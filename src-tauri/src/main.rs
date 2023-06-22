@@ -8,10 +8,9 @@ mod entity {
 }
 
 use crate::entity::account::Account;
-use tauri::{CustomMenuItem, Menu, MenuItem, Submenu};
+// use tauri::{CustomMenuItem, Menu, MenuItem, Submenu};
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-
 #[tauri::command]
 fn query_all() -> Vec<Account> {
     let result = sqlite::query_all_accounts();
@@ -100,27 +99,27 @@ fn main() {
     // 先创建db文件
     sqlite::create_if_not_exists().expect("create_if_not_exists error");
     // 这里 `"quit".to_string()` 定义菜单项 ID，第二个参数是菜单项标签。
-    let quit = CustomMenuItem::new("quit".to_string(), "Quit");
-    let close = CustomMenuItem::new("close".to_string(), "Close");
-    let submenu = Submenu::new("File", Menu::new().add_item(quit).add_item(close));
-    let menu = Menu::new()
-        .add_native_item(MenuItem::Copy)
-        .add_item(CustomMenuItem::new("hide", "Hide"))
-        .add_submenu(submenu);
+    // let quit = CustomMenuItem::new("quit".to_string(), "Quit");
+    // let close = CustomMenuItem::new("close".to_string(), "Close");
+    // let submenu = Submenu::new("File", Menu::new().add_item(quit).add_item(close));
+    // let menu = Menu::new()
+    //     .add_native_item(MenuItem::Copy)
+    //     .add_item(CustomMenuItem::new("hide", "Hide"))
+    //     .add_submenu(submenu);
 
     tauri::Builder::default()
-        .menu(menu)
-        .on_menu_event(|event| {
-            match event.menu_item_id() {
-                "quit" => {
-                    std::process::exit(0);
-                }
-                "close" => {
-                    event.window().close().unwrap()
-                }
-                _ => {}
-            }
-        })
+        // .menu(menu)
+        // .on_menu_event(|event| {
+        //     match event.menu_item_id() {
+        //         "quit" => {
+        //             std::process::exit(0);
+        //         }
+        //         "close" => {
+        //             event.window().close().unwrap()
+        //         }
+        //         _ => {}
+        //     }
+        // })
         .invoke_handler(tauri::generate_handler![query_all,delete,query_by_value,update_like,insert,update])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

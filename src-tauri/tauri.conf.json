@@ -25,13 +25,14 @@
       "dialog": {
         "all": false,
         "open": true,
-        "message": true
+        "message": true,
+        "confirm": true
       }
     },
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.tauri.dev",
+      "identifier": "aki.auto-paste",
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -47,9 +48,9 @@
       {
         "fullscreen": false,
         "resizable": false,
-        "title": "auto-paste-tauri",
+        "title": "AUTO PASTE",
         "width": 500,
-        "height": 815
+        "height": 786
       }
     ]
   }

@@ -39,6 +39,7 @@ pub(crate) fn create_if_not_exists() -> Result<()> {
 
 pub(crate) fn insert_account(account: &Account) -> Result<()> {
     let conn = DB_CONNECTION.lock().unwrap();
+    let default_description = "这个人好懒,没有给他写备注信息呢┓(´∀`)┏".to_string();
     conn.execute(
         "INSERT INTO account (name, username, password, sequence, liked, description, last_update_time)
         VALUES (?, ?, ?, IFNULL(?, 1), ?, ?, datetime('now'))",
@@ -48,7 +49,7 @@ pub(crate) fn insert_account(account: &Account) -> Result<()> {
             account.password,
             account.sequence,
             account.liked.unwrap(),
-            account.description,
+            if account.description.is_none() || account.description.clone().unwrap().is_empty() { default_description } else { account.description.clone().unwrap() },
         ],
     )?;
 
@@ -62,15 +63,15 @@ pub(crate) fn update_account(account: &Account) -> Result<()> {
         let conn = DB_CONNECTION.lock().unwrap();
         let default_description = "这个人好懒,没有给他写备注信息呢┓(´∀`)┏".to_string();
         conn.execute(
-            "UPDATE account SET name = ?, username = ?, password = ?, sequence = ?, liked = ?, content = ? WHERE id = ?",
-            &[
-                &account.name,
-                &account.username,
-                &account.password,
-                &account.sequence.unwrap().to_string(),
-                &account.id.unwrap().to_string(),
-                &account.liked.unwrap().to_string(),
-                if account.description.is_none() { &default_description } else { &account.description.as_ref().unwrap() },
+            "UPDATE account SET name = ?, username = ?, password = ?, sequence = ?, liked = ?, description = ? WHERE id = ?",
+            params![
+                account.name,
+                account.username,
+                account.password,
+                account.sequence,
+                account.liked,
+                if account.description.is_none() || account.description.clone().unwrap().is_empty() { default_description } else { account.description.clone().unwrap() },
+                account.id,
             ],
         )?;
     }
@@ -107,20 +108,22 @@ pub(crate) fn query_all_accounts() -> Result<Vec<Account>> {
 pub(crate) fn query_accounts_by_value(account: &Account, with_liked: bool) -> Result<Vec<Account>> {
     let mut query = "SELECT * FROM account WHERE 1 = 1".to_string();
 
-    if let Some(_id) = account.id {
-        query += &*format!(" OR username = {}", account.username);
-    }
+    let mut sub_queries = Vec::new();
 
     if !account.name.is_empty() {
-        query += &*format!(" OR name LIKE%{}%", account.username);
+        sub_queries.push(format!("name LIKE '%{}%'", account.name));
     }
 
     if !account.username.is_empty() {
-        query += &*format!(" OR username LIKE%{}%", account.username);
+        sub_queries.push(format!("username LIKE '%{}%'", account.username));
+    }
+
+    if !sub_queries.is_empty() {
+        query += &*format!(" AND ( {} )", &sub_queries.join(" OR "));
     }
 
     if with_liked {
-        query += &*format!(" OR liked = {}", account.liked.unwrap());
+        query += &*format!(" AND liked = {}", account.liked.unwrap());
     }
 
     let conn = DB_CONNECTION.lock().unwrap();
