@@ -21,6 +21,8 @@ npm install
 
 此命令将自动下载和安装项目所需的依赖项。
 
+如果还没有安装过RUST，请访问 Rust 官方网站的[下载页面](https://www.rust-lang.org/tools/install)，按照步骤安装好RUST。
+
 ## 启动步骤
 
 ### 1. 运行开发环境
