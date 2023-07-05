@@ -1,4 +1,3 @@
-```markdown
 # AUTO PASTE
 
 ## 安装步骤
