@@ -345,7 +345,7 @@ async function delete_one(id: number | null) {
 		});
 }
 
-function disableContextMenu(event: { preventDefault: () => void; }) {
+function disableContextMenu(event: { preventDefault: () => void }) {
 	event.preventDefault();
 }
 
@@ -370,8 +370,8 @@ onMounted(() => {
 								label="Search Type"
 								variant="solo-filled"
 								hide-details
-								density="compact"
-							></v-select>
+								density="compact">
+              </v-select>
 						</v-col>
 
 						<v-col cols="8">
@@ -380,14 +380,12 @@ onMounted(() => {
 								variant="solo-filled"
 								v-model="keyword"
 								hide-details
-								density="compact"
-							>
+								density="compact">
 								<template #append-inner>
 									<v-btn
 										icon="mdi-magnify"
 										size="small"
-										@click="query_by_value"
-									>
+										@click="query_by_value">
 										<v-icon icon="mdi-magnify"></v-icon>
 									</v-btn>
 								</template>
@@ -416,8 +414,7 @@ onMounted(() => {
 													variant="tonal"
 													@click="on_click_copy(item.username)"
 													width="100%"
-													class="text-none"
-												>
+													class="text-none">
 													{{ item.username }}
 												</v-btn>
 											</v-col>
@@ -428,8 +425,7 @@ onMounted(() => {
 													variant="tonal"
 													@click="on_click_copy(item.password)"
 													width="100%"
-													class="text-none"
-												>
+													class="text-none">
 													{{ item.password }}
 												</v-btn>
 											</v-col>
@@ -445,13 +441,12 @@ onMounted(() => {
 															v-bind="props"
 															icon="mdi-delete"
 															size="x-small"
-															@click="toggle_update(item)"
-														>
+															@click="toggle_update(item)">
 															<v-icon icon="mdi-file-edit"></v-icon>
 														</v-btn>
 													</template>
 													<v-card class="mx-12">
-														<v-card-title> UPDATE ACCOUNT INFO </v-card-title>
+														<v-card-title> UPDATE ACCOUNT INFO</v-card-title>
 														<v-card-text>
 															<v-container>
 																<v-text-field
@@ -459,31 +454,31 @@ onMounted(() => {
 																	label="NAME*"
 																	variant="solo-filled"
 																	clearable
-																	:rules="[rules.required]"
-																></v-text-field>
+																	:rules="[rules.required]">
+                                </v-text-field>
 
 																<v-text-field
 																	v-model="update_account_info.username"
 																	label="USERNAME*"
 																	variant="solo-filled"
 																	clearable
-																	:rules="[rules.required]"
-																></v-text-field>
+																	:rules="[rules.required]">
+                                </v-text-field>
 
 																<v-text-field
 																	v-model="update_account_info.password"
 																	label="PASSWORD*"
 																	variant="solo-filled"
 																	clearable
-																	:rules="[rules.required]"
-																></v-text-field>
+																	:rules="[rules.required]">
+                                </v-text-field>
 
 																<v-text-field
 																	v-model="update_account_info.description"
 																	label="DESCRIPTION"
 																	variant="solo-filled"
-																	clearable
-																></v-text-field>
+																	clearable>
+                                </v-text-field>
 
 																<v-select
 																	v-model="update_account_info.liked"
@@ -491,15 +486,15 @@ onMounted(() => {
 																	:items="likes"
 																	item-title="title"
 																	item-value="value"
-																	variant="solo-filled"
-																></v-select>
+																	variant="solo-filled">
+                                </v-select>
 
 																<v-select
 																	v-model="update_account_info.sequence"
 																	label="Select sequence of this account"
 																	:items="sequences"
-																	variant="solo-filled"
-																></v-select>
+																	variant="solo-filled">
+                                </v-select>
 															</v-container>
 															<small>*indicates required field</small>
 														</v-card-text>
@@ -511,15 +506,13 @@ onMounted(() => {
 															<v-btn
 																color="error"
 																variant="text"
-																@click="on_update_quit"
-															>
+																@click="on_update_quit">
 																Close
 															</v-btn>
 															<v-btn
 																color="success"
 																variant="text"
-																@click="on_update_save"
-															>
+																@click="on_update_save">
 																Save
 															</v-btn>
 														</v-card-actions>
@@ -531,16 +524,15 @@ onMounted(() => {
 													icon="mdi-delete"
 													size="x-small"
 													variant="tonal"
-													@click="delete_one(item.id)"
-												></v-btn>
+													@click="delete_one(item.id)">
+                        </v-btn>
 											</v-col>
 											<v-col cols="3">
 												<v-btn
 													:icon="item.liked ? 'mdi-heart' : 'mdi-heart-outline'"
 													size="x-small"
 													variant="tonal"
-													@click="on_click_like(item.id, item.liked)"
-												>
+													@click="on_click_like(item.id, item.liked)">
 												</v-btn>
 											</v-col>
 											<v-col cols="3">
@@ -550,8 +542,7 @@ onMounted(() => {
 													"
 													size="x-small"
 													variant="tonal"
-													@click="item.show = !item.show"
-												>
+													@click="item.show = !item.show">
 												</v-btn>
 											</v-col>
 										</v-row>
@@ -581,13 +572,12 @@ onMounted(() => {
 							v-bind="props"
 							size="x-small"
 							icon="mdi-plus"
-							@click="toggle_liked"
-						>
-							<v-icon icon="mdi-plus"></v-icon
-						></v-btn>
+							@click="toggle_liked">
+							<v-icon icon="mdi-plus"></v-icon>
+						</v-btn>
 					</template>
 					<v-card class="mx-12">
-						<v-card-title> CREATE NEW ACCOUNT INFO </v-card-title>
+						<v-card-title> CREATE NEW ACCOUNT INFO</v-card-title>
 						<v-card-text>
 							<v-container>
 								<v-text-field
@@ -595,31 +585,31 @@ onMounted(() => {
 									label="NAME*"
 									variant="solo-filled"
 									clearable
-									:rules="[rules.required]"
-								></v-text-field>
+									:rules="[rules.required]">
+								</v-text-field>
 
 								<v-text-field
 									v-model="insert_account_info.username"
 									label="USERNAME*"
 									variant="solo-filled"
 									clearable
-									:rules="[rules.required]"
-								></v-text-field>
+									:rules="[rules.required]">
+								</v-text-field>
 
 								<v-text-field
 									v-model="insert_account_info.password"
 									label="PASSWORD*"
 									variant="solo-filled"
 									clearable
-									:rules="[rules.required]"
-								></v-text-field>
+									:rules="[rules.required]">
+								</v-text-field>
 
 								<v-text-field
 									v-model="insert_account_info.description"
 									label="DESCRIPTION"
 									variant="solo-filled"
-									clearable
-								></v-text-field>
+									clearable>
+								</v-text-field>
 
 								<v-select
 									v-model="insert_account_info.liked"
@@ -627,15 +617,15 @@ onMounted(() => {
 									:items="likes"
 									item-title="title"
 									item-value="value"
-									variant="solo-filled"
-								></v-select>
+									variant="solo-filled">
+                </v-select>
 
 								<v-select
 									v-model="insert_account_info.sequence"
 									label="Select sequence of this account"
 									:items="sequences"
-									variant="solo-filled"
-								></v-select>
+									variant="solo-filled">
+                </v-select>
 							</v-container>
 							<small>*indicates required field</small>
 						</v-card-text>
@@ -664,14 +654,12 @@ onMounted(() => {
 				"
 				class="ms-5"
 				size="x-small"
-				@click="toggle_liked"
-			></v-btn>
+				@click="toggle_liked"></v-btn>
 			<v-divider
 				class="mx-3 align-self-center"
 				length="24"
 				thickness="2"
-				vertical
-			></v-divider>
+				vertical></v-divider>
 			<v-btn icon="mdi-reload" @click="refresh" size="x-small"></v-btn>
 		</v-toolbar>
 	</v-app>
@@ -688,11 +676,5 @@ onMounted(() => {
 .scroll-container {
 	flex: 1;
 	overflow-y: auto;
-}
-
-.virtual-scroll {
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: space-between;
 }
 </style>

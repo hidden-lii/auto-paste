@@ -13,7 +13,8 @@
     "@mdi/font": "^7.2.96",
     "@tauri-apps/api": "^1.4.0",
     "vue": "^3.2.45",
-    "vuetify": "^3.3.4"
+    "vuetify": "^3.3.4",
+    "vuetify-use-dialog": "^0.6.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^1.4.0",
