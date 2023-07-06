@@ -2,24 +2,24 @@
 import { ref, onMounted } from 'vue';
 import { invoke } from '@tauri-apps/api/tauri';
 import { writeText } from '@tauri-apps/api/clipboard';
-import { message, confirm } from '@tauri-apps/api/dialog';
 import { Account } from './account';
+import { useConfirm, useSnackbar } from 'vuetify-use-dialog';
 
 const items = ref<Account[]>([]);
-const type = ref(['all', 'name', 'username']);
-const selected_type = ref('all');
+const type = ref(['全部', '名称', '账号']);
+const selected_type = ref('全部');
 const liked = ref(false);
 const like_type = ref(0);
 const dialog_insert = ref(false);
 const dialog_update = ref(false);
 const sequences = ref(Array.from({ length: 10 }, (k, v) => v + 1));
 const likes = ref([
-	{ value: true, title: 'Liked' },
-	{ value: false, title: 'Unliked' },
+	{ value: true, title: '喜欢' },
+	{ value: false, title: '普通' }
 ]);
-const keyword = ref();
+const keyword = ref('');
 const rules = ref({
-	required: (v: string) => !!v || 'Field is required',
+	required: (v: string) => !!v || '该项必填!'
 });
 const insert_account_info = ref<Account>({
 	id: null,
@@ -30,7 +30,7 @@ const insert_account_info = ref<Account>({
 	liked: false,
 	description: '',
 	last_update_time: null,
-	show: false,
+	show: false
 });
 const update_account_info = ref<Account>({
 	id: null,
@@ -41,8 +41,10 @@ const update_account_info = ref<Account>({
 	liked: false,
 	description: '',
 	last_update_time: null,
-	show: false,
+	show: false
 });
+const createConfirm = useConfirm();
+const createSnackbar = useSnackbar();
 
 function clear_insert_account_info() {
 	insert_account_info.value = {
@@ -54,7 +56,7 @@ function clear_insert_account_info() {
 		liked: false,
 		description: '',
 		last_update_time: null,
-		show: false,
+		show: false
 	};
 }
 
@@ -68,42 +70,43 @@ function clear_update_account_info() {
 		liked: false,
 		description: '',
 		last_update_time: null,
-		show: false,
+		show: false
 	};
 }
 
-function toggle_liked() {
+async function toggle_liked() {
 	like_type.value = (like_type.value + 1) % 3;
 	liked.value = like_type.value === 1;
+	await query_by_value();
 }
 
 async function on_click_copy(text: string | number | null) {
 	if (!text) {
-		await message('text is required', { title: 'Copy Error', type: 'error' });
+		common_snacker_bar('复制失败: 没有内容诶,你在复制什么?', 'error');
 		return;
 	}
 	await writeText(text.toString());
+	common_snacker_bar('复制成功', 'success');
 }
 
 async function on_click_like(id: number | null, liked: boolean) {
+	const is_like = liked ? '取消标记' : '标记';
 	if (!id) {
-		await message('id is required', {
-			title: 'Mark Like Error',
-			type: 'error',
-		});
+		common_snacker_bar(is_like + '失败: 需要指定id', 'error');
 		return;
 	}
 	await invoke('update_like', { id: id, liked: !liked })
 		.then((res) => {
 			// 在这里处理返回的 Account 类型数据
 			if (!!res && typeof res === 'boolean' && res) {
-				query_all();
+				common_snacker_bar(is_like + '成功', 'success');
+				query_all(false);
 			} else {
-				message('like failed', { title: 'Mark Like Error', type: 'error' });
+				common_snacker_bar(is_like + '失败: 未知原因', 'error');
 			}
 		})
 		.catch((err: unknown) => {
-			message(JSON.stringify(err), { title: 'Mark Like Error', type: 'error' });
+			common_snacker_bar(is_like + '失败: ' + JSON.stringify(err), 'error');
 		});
 }
 
@@ -117,18 +120,22 @@ function toggle_update(account: Account) {
 		liked: account.liked,
 		description: account.description,
 		last_update_time: account.last_update_time,
-		show: account.show,
+		show: account.show
 	};
 }
 
 async function on_update_quit() {
-	const quit = await confirm('Your account info is not saved. Are you sure?', {
-		title: 'Insert Account',
-		type: 'warning',
+	const isConfirmed = await createConfirm({
+		content: '变更未做保存,确认退出吗?',
+		title: '修改账号信息',
+		confirmationText: '确认',
+		cancellationText: '取消'
 	});
-	if (!quit) {
+
+	if (!isConfirmed) {
 		return;
 	}
+
 	dialog_update.value = false;
 	clear_update_account_info();
 }
@@ -144,34 +151,22 @@ async function on_update_save() {
 		liked: update_value.liked,
 		description: update_value.description,
 		last_update_time: null,
-		show: false,
+		show: false
 	};
 	if (!account.id) {
-		await message('id is required', {
-			title: 'Update Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('修改失败: id 为空', 'error');
 		return;
 	}
 	if (!account.name) {
-		await message('name is required', {
-			title: 'Insert Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('修改失败: name 为空', 'error');
 		return;
 	}
 	if (!account.username) {
-		await message('username is required', {
-			title: 'Insert Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('修改失败: username 为空', 'error');
 		return;
 	}
 	if (!account.password) {
-		await message('password is required', {
-			title: 'Insert Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('修改失败: password 为空', 'error');
 		return;
 	}
 	await invoke('update', { account: account })
@@ -179,31 +174,30 @@ async function on_update_save() {
 			// 在这里处理返回的 Account 类型数据
 			if (!!res && typeof res === 'boolean' && res) {
 				dialog_update.value = false;
-				query_all();
+				common_snacker_bar('修改成功', 'success');
+				query_all(false);
 				clear_update_account_info();
 			} else {
-				message('update failed', {
-					title: 'Update Account Error',
-					type: 'error',
-				});
+				common_snacker_bar('修改失败: 未知原因', 'error');
 			}
 		})
 		.catch((err: unknown) => {
-			message(JSON.stringify(err), {
-				title: 'Update Account Error',
-				type: 'error',
-			});
+			common_snacker_bar('修改失败: ' + JSON.stringify(err), 'error');
 		});
 }
 
 async function on_insert_quit() {
-	const quit = await confirm('Your account info is not saved. Are you sure?', {
-		title: 'Insert Account',
-		type: 'warning',
+	const quit = await createConfirm({
+		content: '账号信息还没有保存, 确认退出吗?',
+		title: '添加账号信息',
+		confirmationText: '确认',
+		cancellationText: '取消'
 	});
+
 	if (!quit) {
 		return;
 	}
+
 	dialog_insert.value = false;
 	clear_insert_account_info();
 }
@@ -219,27 +213,18 @@ async function on_insert_save() {
 		liked: insert_value.liked,
 		description: insert_value.description,
 		last_update_time: null,
-		show: false,
+		show: false
 	};
 	if (!account.name) {
-		await message('name is required', {
-			title: 'Insert Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('添加账号信息失败: name 为空', 'error');
 		return;
 	}
 	if (!account.username) {
-		await message('username is required', {
-			title: 'Insert Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('添加账号信息失败: username 为空', 'error');
 		return;
 	}
 	if (!account.password) {
-		await message('password is required', {
-			title: 'Insert Account Error',
-			type: 'error',
-		});
+		common_snacker_bar('添加账号信息失败: password 为空', 'error');
 		return;
 	}
 	await invoke('insert', { account: account })
@@ -247,20 +232,15 @@ async function on_insert_save() {
 			// 在这里处理返回的 Account 类型数据
 			if (!!res && typeof res === 'boolean' && res) {
 				dialog_insert.value = false;
-				query_all();
+				common_snacker_bar('添加账号信息成功', 'success');
+				query_all(false);
 				clear_insert_account_info();
 			} else {
-				message('insert failed', {
-					title: 'Insert Account Error',
-					type: 'error',
-				});
+				common_snacker_bar('添加账号信息失败: 未知原因', 'error');
 			}
 		})
 		.catch((err: unknown) => {
-			message(JSON.stringify(err), {
-				title: 'Insert Account Error',
-				type: 'error',
-			});
+			common_snacker_bar('添加账号信息失败: ' + JSON.stringify(err), 'error');
 		});
 }
 
@@ -271,12 +251,16 @@ async function refresh() {
 	await query_all();
 }
 
-async function query_all() {
+async function query_all(show_snackbar: boolean = true) {
 	// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 	await invoke('query_all').then((res) => {
 		// 在这里处理返回的 Account[] 类型数据
 		if (!!res && res instanceof Array) {
 			items.value = res as Account[];
+
+			if (show_snackbar) {
+				common_snacker_bar('查询成功', 'success');
+			}
 		}
 	});
 }
@@ -285,11 +269,11 @@ async function query_by_value() {
 	let query_value: Account = {
 		id: null,
 		name:
-			selected_type.value === 'all' || selected_type.value === 'name'
+			selected_type.value === '全部' || selected_type.value === '名称'
 				? keyword.value
 				: '',
 		username:
-			selected_type.value === 'all' || selected_type.value === 'username'
+			selected_type.value === '全部' || selected_type.value === '账号'
 				? keyword.value
 				: '',
 		password: '',
@@ -297,52 +281,61 @@ async function query_by_value() {
 		liked: liked.value,
 		description: '',
 		last_update_time: '',
-		show: false,
+		show: false
 	};
 	await invoke('query_by_value', {
 		account: query_value,
-		withLiked: like_type.value > 0,
+		withLiked: like_type.value > 0
 	}).then((res) => {
 		// 在这里处理返回的 Account[] 类型数据
 		if (!!res && res instanceof Array) {
 			items.value = res as Account[];
+			common_snacker_bar('查询成功', 'success');
 		}
 	});
 }
 
 async function delete_one(id: number | null) {
 	if (!id) {
-		await message('id is required', { title: 'Delete Error', type: 'error' });
+		common_snacker_bar('删除账号失败: id 为空', 'error');
 		return;
 	}
-	const delete_confirm = await confirm(
-		'This action cannot be reverted. Are you sure to delete this account?',
-		{
-			title: 'Delete Account',
-			type: 'warning',
-		}
-	);
+	const delete_confirm = await createConfirm({
+		content: '这个操作不可回退, 确认删除此账号吗?',
+		title: '删除账号提示',
+		confirmationText: '确认',
+		cancellationText: '取消'
+	});
+
 	if (!delete_confirm) {
 		return;
 	}
+
 	await invoke('delete', { id: id })
 		.then((res) => {
-			// 在这里处理返回的 Account 类型数据
 			if (!!res && typeof res === 'boolean' && res) {
-				query_all();
+				common_snacker_bar('删除成功', 'success');
+				query_all(false);
 			} else {
-				message('delete failed', {
-					title: 'Delete Account Error',
-					type: 'error',
-				});
+				common_snacker_bar('删除账号失败: 未知原因', 'error');
 			}
 		})
 		.catch((err) => {
-			message(JSON.stringify(err), {
-				title: 'Delete Account Error',
-				type: 'error',
-			});
+			common_snacker_bar('删除账号失败: ' + JSON.stringify(err), 'error');
 		});
+}
+
+function common_snacker_bar(text: string, color: string) {
+	createSnackbar({
+		text: text,
+		snackbarProps: {
+			timeout: 1000,
+			color: color,
+			minWidth: 'fit-content',
+			maxWidth: 'fit-content'
+		},
+		showCloseButton: false
+	});
 }
 
 function disableContextMenu(event: { preventDefault: () => void }) {
@@ -350,7 +343,7 @@ function disableContextMenu(event: { preventDefault: () => void }) {
 }
 
 onMounted(() => {
-	query_all();
+	query_all(false);
 });
 
 // This starter template is using Vue 3 <script setup> SFCs
@@ -367,16 +360,16 @@ onMounted(() => {
 							<v-select
 								v-model="selected_type"
 								:items="type"
-								label="Search Type"
+								label="搜索类型"
 								variant="solo-filled"
 								hide-details
 								density="compact">
-              </v-select>
+							</v-select>
 						</v-col>
 
 						<v-col cols="8">
 							<v-text-field
-								label="Input your search keyword"
+								label="输入关键词"
 								variant="solo-filled"
 								v-model="keyword"
 								hide-details
@@ -404,7 +397,7 @@ onMounted(() => {
 									<v-card-title>{{ item.name }}</v-card-title>
 
 									<v-card-subtitle>
-										Sequence: {{ item.sequence }}
+										优先级: {{ item.sequence }}
 									</v-card-subtitle>
 
 									<v-card-text>
@@ -446,57 +439,63 @@ onMounted(() => {
 														</v-btn>
 													</template>
 													<v-card class="mx-12">
-														<v-card-title> UPDATE ACCOUNT INFO</v-card-title>
+														<v-card-title>修改账号信息</v-card-title>
 														<v-card-text>
 															<v-container>
 																<v-text-field
 																	v-model="update_account_info.name"
-																	label="NAME*"
+																	label="名称*"
 																	variant="solo-filled"
 																	clearable
+																	density="compact"
 																	:rules="[rules.required]">
-                                </v-text-field>
+																</v-text-field>
 
 																<v-text-field
 																	v-model="update_account_info.username"
-																	label="USERNAME*"
+																	label="账号*"
 																	variant="solo-filled"
 																	clearable
+																	density="compact"
 																	:rules="[rules.required]">
-                                </v-text-field>
+																</v-text-field>
 
 																<v-text-field
 																	v-model="update_account_info.password"
-																	label="PASSWORD*"
+																	label="密码*"
 																	variant="solo-filled"
 																	clearable
+																	density="compact"
 																	:rules="[rules.required]">
-                                </v-text-field>
+																</v-text-field>
 
 																<v-text-field
 																	v-model="update_account_info.description"
-																	label="DESCRIPTION"
+																	label="描述"
 																	variant="solo-filled"
+																	density="compact"
 																	clearable>
-                                </v-text-field>
+																</v-text-field>
 
 																<v-select
 																	v-model="update_account_info.liked"
-																	label="mark this account as favorite"
+																	label="标记账号为'喜欢'"
 																	:items="likes"
 																	item-title="title"
 																	item-value="value"
+																	density="compact"
 																	variant="solo-filled">
-                                </v-select>
+																</v-select>
 
 																<v-select
 																	v-model="update_account_info.sequence"
-																	label="Select sequence of this account"
+																	label="选择账号优先级(用于排序)"
 																	:items="sequences"
+																	density="compact"
 																	variant="solo-filled">
-                                </v-select>
+																</v-select>
 															</v-container>
-															<small>*indicates required field</small>
+															<small>带*的为必填项!</small>
 														</v-card-text>
 
 														<v-divider></v-divider>
@@ -507,13 +506,13 @@ onMounted(() => {
 																color="error"
 																variant="text"
 																@click="on_update_quit">
-																Close
+																关闭
 															</v-btn>
 															<v-btn
 																color="success"
 																variant="text"
 																@click="on_update_save">
-																Save
+																保存
 															</v-btn>
 														</v-card-actions>
 													</v-card>
@@ -525,7 +524,7 @@ onMounted(() => {
 													size="x-small"
 													variant="tonal"
 													@click="delete_one(item.id)">
-                        </v-btn>
+												</v-btn>
 											</v-col>
 											<v-col cols="3">
 												<v-btn
@@ -568,66 +567,68 @@ onMounted(() => {
 			<template v-slot:prepend>
 				<v-dialog v-model="dialog_insert" persistent style="width: inherit">
 					<template v-slot:activator="{ props }">
-						<v-btn
-							v-bind="props"
-							size="x-small"
-							icon="mdi-plus"
-							@click="toggle_liked">
+						<v-btn v-bind="props" size="x-small" icon="mdi-plus">
 							<v-icon icon="mdi-plus"></v-icon>
 						</v-btn>
 					</template>
 					<v-card class="mx-12">
-						<v-card-title> CREATE NEW ACCOUNT INFO</v-card-title>
+						<v-card-title>添加账号信息</v-card-title>
 						<v-card-text>
 							<v-container>
 								<v-text-field
 									v-model="insert_account_info.name"
-									label="NAME*"
+									label="名称*"
 									variant="solo-filled"
 									clearable
+									density="compact"
 									:rules="[rules.required]">
 								</v-text-field>
 
 								<v-text-field
 									v-model="insert_account_info.username"
-									label="USERNAME*"
+									label="账号*"
 									variant="solo-filled"
 									clearable
+									density="compact"
 									:rules="[rules.required]">
 								</v-text-field>
 
 								<v-text-field
 									v-model="insert_account_info.password"
-									label="PASSWORD*"
+									label="密码*"
 									variant="solo-filled"
 									clearable
+									density="compact"
 									:rules="[rules.required]">
 								</v-text-field>
 
 								<v-text-field
 									v-model="insert_account_info.description"
-									label="DESCRIPTION"
+									label="描述"
 									variant="solo-filled"
+									density="compact"
 									clearable>
 								</v-text-field>
 
 								<v-select
 									v-model="insert_account_info.liked"
-									label="mark this account as favorite"
+									label="标记账号为'喜欢'"
 									:items="likes"
 									item-title="title"
 									item-value="value"
+									density="compact"
 									variant="solo-filled">
-                </v-select>
+								</v-select>
 
 								<v-select
 									v-model="insert_account_info.sequence"
-									label="Select sequence of this account"
+									label="选择账号优先级(用于排序)"
 									:items="sequences"
+									density="compact"
 									variant="solo-filled">
-                </v-select>
+								</v-select>
 							</v-container>
-							<small>*indicates required field</small>
+							<small>带*的为必填项!</small>
 						</v-card-text>
 
 						<v-divider></v-divider>
@@ -635,10 +636,10 @@ onMounted(() => {
 						<v-card-actions>
 							<v-spacer></v-spacer>
 							<v-btn color="error" variant="text" @click="on_insert_quit">
-								Close
+								关闭
 							</v-btn>
 							<v-btn color="success" variant="text" @click="on_insert_save">
-								Save
+								保存
 							</v-btn>
 						</v-card-actions>
 					</v-card>
