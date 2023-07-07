@@ -1,5 +1,7 @@
-use rusqlite::{Connection, Result, params};
-use crate::entity::account::{Account};
+use crate::entity::account::Account;
+use crate::entity::account_group::AccountGroup;
+use crate::entity::group::Group;
+use rusqlite::{params, Connection, Result};
 use std::sync::Mutex;
 
 lazy_static::lazy_static! {
@@ -8,7 +10,7 @@ lazy_static::lazy_static! {
 
 pub(crate) fn create_if_not_exists() -> Result<()> {
     let conn = DB_CONNECTION.lock().unwrap();
-    // 建表
+    // 创建 account 表
     conn.execute(
         "CREATE TABLE IF NOT EXISTS account (
             id INTEGER PRIMARY KEY,
@@ -19,10 +21,31 @@ pub(crate) fn create_if_not_exists() -> Result<()> {
             liked INTEGER NOT NULL DEFAULT 0,
             description TEXT,
             last_update_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now', 'localtime'))
-        )",
+        );",
         [],
     )?;
-    // 创建触发器
+
+    // 创建 group 表
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS group (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            sequence INTEGER,
+            last_update_time TEXT)",
+        [],
+    )?;
+
+    // 创建 AccountGroup 表
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS account_group (
+            id INTEGER PRIMARY KEY,
+            account_id INTEGER NOT NULL,
+            group_id INTEGER NOT NULL,
+            last_update_time TEXT)",
+        [],
+    )?;
+
+    // 创建 account 触发器
     conn.execute(
         "
         CREATE TRIGGER IF NOT EXISTS update_timestamp
@@ -34,6 +57,29 @@ pub(crate) fn create_if_not_exists() -> Result<()> {
         ",
         [],
     )?;
+
+    // 创建 AccountGroup 表的触发器
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS update_account_group_last_update_time
+         AFTER UPDATE ON account_group
+         FOR EACH ROW
+         BEGIN
+            UPDATE account_group SET last_update_time = (strftime('%Y-%m-%d %H:%M:%f', 'now', 'localtime')) WHERE id = OLD.id;
+         END",
+        [],
+    )?;
+
+    // 创建 Group 表的触发器
+    conn.execute(
+        "CREATE TRIGGER IF NOT EXISTS update_group_last_update_time
+         AFTER UPDATE ON group
+         FOR EACH ROW
+         BEGIN
+            UPDATE Group SET last_update_time = (strftime('%Y-%m-%d %H:%M:%f', 'now', 'localtime')) WHERE id = OLD.id;
+         END",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -90,10 +136,7 @@ pub(crate) fn like_account(id: i32, liked: bool) -> Result<()> {
 
 pub(crate) fn delete_by_id(id: i32) -> Result<()> {
     let conn = DB_CONNECTION.lock().unwrap();
-    conn.execute(
-        "DELETE FROM account WHERE id = ?",
-        params![id],
-    )?;
+    conn.execute("DELETE FROM account WHERE id = ?", params![id])?;
 
     Ok(())
 }
@@ -153,4 +196,3 @@ fn _do_query(stmt: &mut rusqlite::Statement) -> Result<Vec<Account>> {
 
     Ok(accounts)
 }
-

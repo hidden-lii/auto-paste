@@ -5,6 +5,8 @@ mod sqlite;
 
 mod entity {
     pub mod account;
+    pub mod group;
+    pub mod account_group;
 }
 
 use crate::entity::account::Account;
