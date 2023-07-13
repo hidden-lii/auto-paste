@@ -10,4 +10,7 @@ class Account {
     public description: string | null = null;
     public last_update_time: string | null = null;
     public show: boolean = false;
+
+    constructor(){
+    }
 }

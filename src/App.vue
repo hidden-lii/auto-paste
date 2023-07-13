@@ -1,77 +1,101 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/tauri';
 import { writeText } from '@tauri-apps/api/clipboard';
 import { Account } from './account';
 import { useConfirm, useSnackbar } from 'vuetify-use-dialog';
+import { Category } from './category';
 
 const items = ref<Account[]>([]);
 const type = ref(['全部', '名称', '账号']);
+const category = ref<Category[]>([new Category(-1, '全部')]);
 const selected_type = ref('全部');
+const selected_category = ref(new Category(-1, '全部'));
 const liked = ref(false);
 const like_type = ref(0);
 const dialog_insert = ref(false);
 const dialog_update = ref(false);
+const dialog_insert_category = ref(false);
+const dialog_update_category = ref(false);
 const sequences = ref(Array.from({ length: 10 }, (k, v) => v + 1));
 const likes = ref([
 	{ value: true, title: '喜欢' },
 	{ value: false, title: '普通' }
 ]);
 const keyword = ref('');
+const show_category_select = ref(false);
 const rules = ref({
 	required: (v: string) => !!v || '该项必填!'
 });
-const insert_account_info = ref<Account>({
-	id: null,
-	name: null,
-	username: '',
-	password: '',
-	sequence: 1,
-	liked: false,
-	description: '',
-	last_update_time: null,
-	show: false
-});
-const update_account_info = ref<Account>({
-	id: null,
-	name: null,
-	username: '',
-	password: '',
-	sequence: 1,
-	liked: false,
-	description: '',
-	last_update_time: null,
-	show: false
-});
+const insert_account_info = ref<Account>(new Account());
+const update_account_info = ref<Account>(new Account());
+const insert_category_info = ref<Category>(new Category(null, ''));
+const update_category_info = ref<Category>(new Category(null, ''));
 const createConfirm = useConfirm();
 const createSnackbar = useSnackbar();
 
 function clear_insert_account_info() {
-	insert_account_info.value = {
-		id: null,
-		name: null,
-		username: '',
-		password: '',
-		sequence: 1,
-		liked: false,
-		description: '',
-		last_update_time: null,
-		show: false
-	};
+	insert_account_info.value = new Account();
 }
 
 function clear_update_account_info() {
-	update_account_info.value = {
+	update_account_info.value = new Account();
+}
+
+function clear_insert_category_info() {
+	insert_category_info.value = new Category(null, '');
+}
+
+function clear_update_category_info() {
+	update_category_info.value = new Category(null, '');
+}
+
+function toggle_show_category_select() {
+	show_category_select.value = !show_category_select.value;
+}
+
+async function on_insert_category_quit() {
+	const quit = await createConfirm({
+		content: '分组还没有保存, 确认退出吗?',
+		title: '添加分组',
+		confirmationText: '确认',
+		cancellationText: '取消'
+	});
+
+	if (!quit) {
+		return;
+	}
+
+	dialog_insert_category.value = false;
+	clear_insert_category_info();
+}
+
+async function on_insert_category_save() {
+	let insert_value = insert_category_info.value;
+	const category: Category = {
 		id: null,
-		name: null,
-		username: '',
-		password: '',
-		sequence: 1,
-		liked: false,
-		description: '',
-		last_update_time: null,
-		show: false
+		name: insert_value.name,
+		sequence: insert_value.sequence,
+		last_update_time: null
 	};
+	if (!category.name) {
+		common_snacker_bar('添加分组失败: 名称 为空', 'error');
+		return;
+	}
+	await invoke('create_category', { category: category })
+		.then((res) => {
+			if (!!res && typeof res === 'boolean' && res) {
+				dialog_insert_category.value = false;
+				common_snacker_bar('添加分组成功', 'success');
+				query_all_categories(false);
+				clear_insert_category_info();
+			} else {
+				common_snacker_bar('添加分组失败: 未知原因', 'error');
+			}
+		})
+		.catch((err: unknown) => {
+			common_snacker_bar('添加分组失败: ' + JSON.stringify(err), 'error');
+		});
 }
 
 async function toggle_liked() {
@@ -338,12 +362,83 @@ function common_snacker_bar(text: string, color: string) {
 	});
 }
 
+
+async function query_all_categories(show_snackbar: boolean = true) {
+	await invoke('query_all_category').then((res) => {
+		// 在这里处理返回的 Account[] 类型数据
+		if (!!res && res instanceof Array) {
+			category.value = [new Category(-1, '全部'), ...(res as Category[])];
+
+			if (show_snackbar) {
+				common_snacker_bar('查询分组成功', 'success');
+			}
+		}
+	});
+}
+
+// 判断是否显示清除按钮
+const shouldShowClearButton = computed(() => {
+	return (
+		selected_category.value !== null &&
+		selected_category.value.id !== null &&
+		selected_category.value.id !== -1
+	);
+});
+
+// 监听 selected_category 变化
+watch(selected_category, (newValue, oldValue) => {
+	if (newValue === null && oldValue === null) {
+		selected_category.value = new Category(-1, '全部');
+	} else if (newValue === null) {
+		selected_category.value = oldValue;
+	} else {
+		selected_category.value = newValue;
+	}
+});
+
+async function on_clear_category() {
+	// 如果不加这个的话,下面拿不到正确的value,暂时还不清楚原因...
+	createSnackbar({ snackbarProps: { timeout: 0 }, showCloseButton: false });
+	if (selected_category.value === null) {
+		common_snacker_bar('删除分组失败: 未获取到选中值', 'error');
+		return;
+	}
+	let id = selected_category.value.id;
+	if (!id || id === null || id === -1) {
+		common_snacker_bar('删除分组失败: id 为空', 'error');
+		return;
+	}
+	const delete_confirm = await createConfirm({
+		content: '这个操作不可回退, 确认删除此分组吗?',
+		title: '删除分组提示',
+		confirmationText: '确认',
+		cancellationText: '取消'
+	});
+	if (!delete_confirm) {
+		return;
+	}
+	await invoke('delete_category_by_id', { id: id })
+		.then((res) => {
+			if (!!res && typeof res === 'boolean' && res) {
+				common_snacker_bar('删除成功', 'success');
+				query_all_categories(false);
+				selected_category.value = new Category(-1, '全部');
+			} else {
+				common_snacker_bar('删除分组失败: 未知原因', 'error');
+			}
+		})
+		.catch((err) => {
+			common_snacker_bar('删除分组失败: ' + JSON.stringify(err), 'error');
+		});
+}
+
 function disableContextMenu(event: { preventDefault: () => void }) {
 	event.preventDefault();
 }
 
 onMounted(() => {
 	query_all(false);
+	query_all_categories(false);
 });
 
 // This starter template is using Vue 3 <script setup> SFCs
@@ -356,7 +451,7 @@ onMounted(() => {
 			<div class="container">
 				<v-container>
 					<v-row>
-						<v-col cols="4">
+						<v-col cols="3">
 							<v-select
 								v-model="selected_type"
 								:items="type"
@@ -384,7 +479,88 @@ onMounted(() => {
 								</template>
 							</v-text-field>
 						</v-col>
+
+						<v-col cols="1" class="col-align-center">
+							<v-btn
+								:icon="
+									show_category_select ? 'mdi-chevron-up' : 'mdi-chevron-down'
+								"
+								size="x-small"
+								@click="toggle_show_category_select">
+							</v-btn>
+						</v-col>
 					</v-row>
+					<v-expand-transition>
+						<v-row v-show="show_category_select">
+							<v-col cols="9">
+								<v-select
+									v-model="selected_category"
+									:items="category"
+									item-title="name"
+									item-value="id"
+									return-object
+									label="账号分组"
+									variant="solo-filled"
+									hide-details
+									:clearable="shouldShowClearButton"
+									@click:clear="on_clear_category"
+									density="compact">
+								</v-select>
+							</v-col>
+							<v-col class="col-align-center">
+								<v-dialog v-model="dialog_insert_category" persistent>
+									<template v-slot:activator="{ props }">
+										<v-btn variant="tonal" v-bind="props">添加分组</v-btn>
+									</template>
+									<v-card class="mx-12">
+										<v-card-title>添加分组</v-card-title>
+										<v-card-text>
+											<v-container>
+												<v-text-field
+													v-model="insert_category_info.name"
+													label="名称*"
+													variant="solo-filled"
+													clearable
+													density="compact"
+													:rules="[rules.required]">
+												</v-text-field>
+
+												<v-select
+													v-model="insert_category_info.sequence"
+													label="选择账号优先级(用于排序)"
+													:items="sequences"
+													density="compact"
+													variant="solo-filled">
+												</v-select>
+											</v-container>
+											<small>带*的为必填项!</small>
+										</v-card-text>
+
+										<v-divider></v-divider>
+
+										<v-card-actions>
+											<v-spacer></v-spacer>
+											<v-btn
+												color="error"
+												variant="text"
+												@click="on_insert_category_quit">
+												关闭
+											</v-btn>
+											<v-btn
+												color="success"
+												variant="text"
+												@click="on_insert_category_save">
+												保存
+											</v-btn>
+										</v-card-actions>
+									</v-card>
+								</v-dialog>
+							</v-col>
+							<!-- <v-col class="col-align-center">
+								<v-btn variant="tonal">删除分组</v-btn>
+							</v-col> -->
+						</v-row>
+					</v-expand-transition>
 				</v-container>
 
 				<v-divider></v-divider>
@@ -393,169 +569,162 @@ onMounted(() => {
 					<v-row dense>
 						<template v-for="(item, index) in items" :key="index">
 							<v-col cols="6">
-								<v-card>
-									<v-card-title>{{ item.name }}</v-card-title>
+								<v-hover v-slot="{ isHovering, props }">
+									<v-card v-bind="props">
+										<v-sheet class="edit-button" v-if="isHovering">
+											<v-btn
+												:icon="item.liked ? 'mdi-heart' : 'mdi-heart-outline'"
+												size="x-small"
+												variant="tonal"
+												@click="on_click_like(item.id, item.liked)">
+											</v-btn>
+										</v-sheet>
+										<v-sheet class="close-button" v-if="isHovering">
+											<v-btn
+												icon="mdi-delete"
+												size="x-small"
+												variant="tonal"
+												@click="delete_one(item.id)">
+											</v-btn>
+										</v-sheet>
+										<v-card-title>
+											<v-dialog v-model="dialog_update" persistent>
+												<template v-slot:activator="{ props }">
+													<v-chip
+														class="ma-2"
+														variant="outlined"
+														v-bind="props"
+														@click="toggle_update(item)">
+														{{ item.name }}
+													</v-chip>
+													<!-- <v-btn
+														:icon="
+															item.show ? 'mdi-chevron-up' : 'mdi-chevron-down'
+														"
+														size="x-small"
+														variant="tonal"
+														@click="item.show = !item.show">
+													</v-btn> -->
+												</template>
+												<v-card class="mx-12">
+													<v-card-title>修改账号信息</v-card-title>
+													<v-card-text>
+														<v-container>
+															<v-text-field
+																v-model="update_account_info.name"
+																label="名称*"
+																variant="solo-filled"
+																clearable
+																density="compact"
+																:rules="[rules.required]">
+															</v-text-field>
 
-									<v-card-subtitle>
-										优先级: {{ item.sequence }}
-									</v-card-subtitle>
+															<v-text-field
+																v-model="update_account_info.username"
+																label="账号*"
+																variant="solo-filled"
+																clearable
+																density="compact"
+																:rules="[rules.required]">
+															</v-text-field>
 
-									<v-card-text>
-										<v-row>
-											<v-col cols="12">
-												<v-btn
-													variant="tonal"
-													@click="on_click_copy(item.username)"
-													width="100%"
-													class="text-none">
-													{{ item.username }}
-												</v-btn>
-											</v-col>
-										</v-row>
-										<v-row>
-											<v-col cols="12">
-												<v-btn
-													variant="tonal"
-													@click="on_click_copy(item.password)"
-													width="100%"
-													class="text-none">
-													{{ item.password }}
-												</v-btn>
-											</v-col>
-										</v-row>
-									</v-card-text>
-									<v-card-actions>
-										<v-row justify="start">
-											<v-col cols="3">
-												<v-dialog v-model="dialog_update" persistent>
-													<template v-slot:activator="{ props }">
+															<v-text-field
+																v-model="update_account_info.password"
+																label="密码*"
+																variant="solo-filled"
+																clearable
+																density="compact"
+																:rules="[rules.required]">
+															</v-text-field>
+
+															<v-text-field
+																v-model="update_account_info.description"
+																label="描述"
+																variant="solo-filled"
+																density="compact"
+																clearable>
+															</v-text-field>
+
+															<v-select
+																v-model="update_account_info.liked"
+																label="标记账号为'喜欢'"
+																:items="likes"
+																item-title="title"
+																item-value="value"
+																density="compact"
+																variant="solo-filled">
+															</v-select>
+
+															<v-select
+																v-model="update_account_info.sequence"
+																label="选择账号优先级(用于排序)"
+																:items="sequences"
+																density="compact"
+																variant="solo-filled">
+															</v-select>
+														</v-container>
+														<small>带*的为必填项!</small>
+													</v-card-text>
+
+													<v-divider></v-divider>
+
+													<v-card-actions>
+														<v-spacer></v-spacer>
 														<v-btn
-															variant="tonal"
-															v-bind="props"
-															icon="mdi-delete"
-															size="x-small"
-															@click="toggle_update(item)">
-															<v-icon icon="mdi-file-edit"></v-icon>
+															color="error"
+															variant="text"
+															@click="on_update_quit">
+															关闭
 														</v-btn>
-													</template>
-													<v-card class="mx-12">
-														<v-card-title>修改账号信息</v-card-title>
-														<v-card-text>
-															<v-container>
-																<v-text-field
-																	v-model="update_account_info.name"
-																	label="名称*"
-																	variant="solo-filled"
-																	clearable
-																	density="compact"
-																	:rules="[rules.required]">
-																</v-text-field>
+														<v-btn
+															color="success"
+															variant="text"
+															@click="on_update_save">
+															保存
+														</v-btn>
+													</v-card-actions>
+												</v-card>
+											</v-dialog>
+										</v-card-title>
 
-																<v-text-field
-																	v-model="update_account_info.username"
-																	label="账号*"
-																	variant="solo-filled"
-																	clearable
-																	density="compact"
-																	:rules="[rules.required]">
-																</v-text-field>
+										<v-card-subtitle>
+											优先级: {{ item.sequence }}
+										</v-card-subtitle>
 
-																<v-text-field
-																	v-model="update_account_info.password"
-																	label="密码*"
-																	variant="solo-filled"
-																	clearable
-																	density="compact"
-																	:rules="[rules.required]">
-																</v-text-field>
-
-																<v-text-field
-																	v-model="update_account_info.description"
-																	label="描述"
-																	variant="solo-filled"
-																	density="compact"
-																	clearable>
-																</v-text-field>
-
-																<v-select
-																	v-model="update_account_info.liked"
-																	label="标记账号为'喜欢'"
-																	:items="likes"
-																	item-title="title"
-																	item-value="value"
-																	density="compact"
-																	variant="solo-filled">
-																</v-select>
-
-																<v-select
-																	v-model="update_account_info.sequence"
-																	label="选择账号优先级(用于排序)"
-																	:items="sequences"
-																	density="compact"
-																	variant="solo-filled">
-																</v-select>
-															</v-container>
-															<small>带*的为必填项!</small>
-														</v-card-text>
-
-														<v-divider></v-divider>
-
-														<v-card-actions>
-															<v-spacer></v-spacer>
-															<v-btn
-																color="error"
-																variant="text"
-																@click="on_update_quit">
-																关闭
-															</v-btn>
-															<v-btn
-																color="success"
-																variant="text"
-																@click="on_update_save">
-																保存
-															</v-btn>
-														</v-card-actions>
-													</v-card>
-												</v-dialog>
-											</v-col>
-											<v-col cols="3">
-												<v-btn
-													icon="mdi-delete"
-													size="x-small"
-													variant="tonal"
-													@click="delete_one(item.id)">
-												</v-btn>
-											</v-col>
-											<v-col cols="3">
-												<v-btn
-													:icon="item.liked ? 'mdi-heart' : 'mdi-heart-outline'"
-													size="x-small"
-													variant="tonal"
-													@click="on_click_like(item.id, item.liked)">
-												</v-btn>
-											</v-col>
-											<v-col cols="3">
-												<v-btn
-													:icon="
-														item.show ? 'mdi-chevron-up' : 'mdi-chevron-down'
-													"
-													size="x-small"
-													variant="tonal"
-													@click="item.show = !item.show">
-												</v-btn>
-											</v-col>
-										</v-row>
-									</v-card-actions>
-
-									<v-expand-transition>
-										<div v-show="item.show">
-											<v-divider></v-divider>
-											<v-card-text>
-												{{ item.description }}
-											</v-card-text>
-										</div>
-									</v-expand-transition>
-								</v-card>
+										<v-card-text>
+											<v-row>
+												<v-col cols="12">
+													<v-btn
+														variant="tonal"
+														@click="on_click_copy(item.username)"
+														width="100%"
+														class="text-none">
+														{{ item.username }}
+													</v-btn>
+												</v-col>
+											</v-row>
+											<v-row>
+												<v-col cols="12">
+													<v-btn
+														variant="tonal"
+														@click="on_click_copy(item.password)"
+														width="100%"
+														class="text-none">
+														{{ item.password }}
+													</v-btn>
+												</v-col>
+											</v-row>
+										</v-card-text>
+										<v-expand-transition>
+											<div v-show="item.show">
+												<v-divider></v-divider>
+												<v-card-text>
+													{{ item.description }}
+												</v-card-text>
+											</div>
+										</v-expand-transition>
+									</v-card>
+								</v-hover>
 							</v-col>
 						</template>
 					</v-row>
@@ -677,5 +846,27 @@ onMounted(() => {
 .scroll-container {
 	flex: 1;
 	overflow-y: auto;
+}
+
+.col-align-center {
+	align-self: center;
+	padding: 0;
+	margin: 0;
+}
+
+.close-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+	z-index: 1;
+	cursor: pointer;
+	border-radius: 50%;
+}
+
+.edit-button {
+	position: absolute;
+	z-index: 1;
+	cursor: pointer;
+	border-radius: 50%;
 }
 </style>
