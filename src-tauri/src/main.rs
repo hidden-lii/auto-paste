@@ -15,7 +15,7 @@ use crate::entity::category::Category;
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
-fn query_all() -> Vec<Account> {
+fn query_all_accounts() -> Vec<Account> {
     let result = sqlite::query_all_accounts();
     match result {
         Ok(accounts) => accounts,
@@ -27,8 +27,8 @@ fn query_all() -> Vec<Account> {
 }
 
 #[tauri::command]
-fn query_by_value(account: Account, with_liked: bool) -> Vec<Account> {
-    let result = sqlite::query_accounts_by_value(&account, with_liked);
+fn query_accounts_by_value(account: Account, with_liked: bool, category_id: i32) -> Vec<Account> {
+    let result = sqlite::query_accounts_by_value(&account, with_liked, category_id);
     match result {
         Ok(accounts) => accounts,
         Err(e) => {
@@ -39,7 +39,7 @@ fn query_by_value(account: Account, with_liked: bool) -> Vec<Account> {
 }
 
 #[tauri::command]
-fn insert(account: Account) -> bool {
+fn insert_account(account: Account) -> bool {
     if let Err(e) = sqlite::insert_account(&account) {
         println!("{}", format!("insert_account error: {:?}", e));
         return false;
@@ -49,7 +49,7 @@ fn insert(account: Account) -> bool {
 }
 
 #[tauri::command]
-fn update(account: Account) -> bool {
+fn update_account(account: Account) -> bool {
     if let Err(e) = sqlite::update_account(&account) {
         println!("{}", format!("update_account error: {:?}", e));
         return false;
@@ -69,7 +69,7 @@ fn update_like(id: i32, liked: bool) -> bool {
 }
 
 #[tauri::command]
-fn delete(id: i32) -> bool {
+fn delete_account(id: i32) -> bool {
     if let Err(e) = sqlite::delete_by_id(id) {
         println!("{}", format!("delete error: {:?}", e));
         return false;
@@ -120,50 +120,6 @@ fn delete_category_by_id(id: i32) -> bool {
     true
 }
 
-#[tauri::command]
-fn batch_create_account_categories(account_id: i32, category_ids: Vec<i32>) -> bool {
-    if let Err(e) = sqlite::batch_create_account_categories(account_id, category_ids) {
-        println!("{}", format!("batch_create_account_categories error: {:?}", e));
-        return false;
-    }
-
-    true
-}
-
-#[tauri::command]
-fn batch_delete_account_categories(account_category_ids: Vec<i32>) -> bool {
-    if let Err(e) = sqlite::batch_delete_account_categories(account_category_ids) {
-        println!("{}", format!("batch_delete_account_categories error: {:?}", e));
-        return false;
-    }
-
-    true
-}
-
-#[tauri::command]
-fn query_categries_by_account_id(account_id: i32) -> Vec<Category> {
-    let result = sqlite::query_categries_by_account_id(account_id);
-    match result {
-        Ok(categories) => categories,
-        Err(e) => {
-            println!("{}", format!("query_categries_by_account_id error: {:?}", e));
-            vec![]
-        }
-    }
-}
-
-#[tauri::command]
-fn query_accounts_by_category_id(category_id: i32) -> Vec<Account> {
-    let result = sqlite::query_accounts_by_category_id(category_id);
-    match result {
-        Ok(accounts) => accounts,
-        Err(e) => {
-            println!("{}", format!("query_accounts_by_category_id error: {:?}", e));
-            vec![]
-        }
-    }
-}
-
 // fn main() {
 //     match insert(Account {
 //         id: None,
@@ -192,6 +148,7 @@ fn main() {
     //     .add_item(CustomMenuItem::new("hide", "Hide"))
     //     .add_submenu(submenu);
 
+
     tauri::Builder::default()
         // .menu(menu)
         // .on_menu_event(|event| {
@@ -206,20 +163,16 @@ fn main() {
         //     }
         // })
         .invoke_handler(tauri::generate_handler![
-            query_all,
-            delete,
-            query_by_value,
+            query_all_accounts,
+            delete_account,
+            query_accounts_by_value,
             update_like,
-            insert,
-            update,
+            insert_account,
+            update_account,
             create_category,
             query_all_category,
             update_category,
-            delete_category_by_id,
-            batch_create_account_categories,
-            batch_delete_account_categories,
-            query_categries_by_account_id,
-            query_accounts_by_category_id
+            delete_category_by_id
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

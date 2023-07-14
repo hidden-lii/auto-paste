@@ -1,6 +1,6 @@
 use crate::entity::account::Account;
 use crate::entity::category::Category;
-use rusqlite::{named_params, params, Connection, Result, ToSql};
+use rusqlite::{params, Connection, Result, ToSql};
 use std::sync::Mutex;
 
 lazy_static::lazy_static! {
@@ -85,7 +85,8 @@ pub(crate) fn create_if_not_exists() -> Result<()> {
 }
 
 pub(crate) fn insert_account(account: &Account) -> Result<()> {
-    let conn = DB_CONNECTION.lock().unwrap();
+    let conn = &mut DB_CONNECTION.lock().unwrap();
+
     let default_description = "这个人好懒,没有给他写备注信息呢┓(´∀`)┏".to_string();
     conn.execute(
         "INSERT INTO account (name, username, password, sequence, liked, description, last_update_time)
@@ -100,6 +101,22 @@ pub(crate) fn insert_account(account: &Account) -> Result<()> {
         ],
     )?;
 
+    let account_id = conn.last_insert_rowid() as i32;
+
+    let batch = conn.transaction()?;
+
+    if let Some(account_category_ids) = &account.account_category_ids {
+        for category_id in account_category_ids {
+            batch.execute(
+                "INSERT INTO account_category (account_id, category_id, last_update_time)
+                    VALUES (?, ?, datetime('now'))",
+                params![account_id, category_id],
+            )?;
+        }
+    }
+
+    batch.commit()?;
+
     Ok(())
 }
 
@@ -107,9 +124,11 @@ pub(crate) fn update_account(account: &Account) -> Result<()> {
     if account.id.is_none() {
         insert_account(account)?;
     } else {
-        let conn = DB_CONNECTION.lock().unwrap();
+        let conn = &mut DB_CONNECTION.lock().unwrap();
+        let batch = conn.transaction()?;
+
         let default_description = "这个人好懒,没有给他写备注信息呢┓(´∀`)┏".to_string();
-        conn.execute(
+        batch.execute(
             "UPDATE account SET name = ?, username = ?, password = ?, sequence = ?, liked = ?, description = ? WHERE id = ?",
             params![
                 account.name,
@@ -121,6 +140,23 @@ pub(crate) fn update_account(account: &Account) -> Result<()> {
                 account.id,
             ],
         )?;
+
+        batch.execute(
+            "DELETE FROM account_category WHERE account_id = ?",
+            params![account.id],
+        )?;
+
+        if let Some(account_category_ids) = &account.account_category_ids {
+            for category_id in account_category_ids {
+                batch.execute(
+                    "INSERT INTO account_category (account_id, category_id, last_update_time)
+                        VALUES (?, ?, datetime('now'))",
+                    params![account.id, category_id],
+                )?;
+            }
+        }
+
+        batch.commit()?;
     }
 
     Ok(())
@@ -137,21 +173,52 @@ pub(crate) fn like_account(id: i32, liked: bool) -> Result<()> {
 }
 
 pub(crate) fn delete_by_id(id: i32) -> Result<()> {
-    let conn = DB_CONNECTION.lock().unwrap();
-    conn.execute("DELETE FROM account WHERE id = ?", params![id])?;
+    let conn = &mut DB_CONNECTION.lock().unwrap();
+    let batch = conn.transaction()?;
+
+    batch.execute("DELETE FROM account WHERE id = ?", params![id])?;
+
+    batch.execute(
+        "DELETE FROM account_category WHERE account_id = ?",
+        params![id],
+    )?;
+
+    batch.commit()?;
 
     Ok(())
 }
 
 pub(crate) fn query_all_accounts() -> Result<Vec<Account>> {
     let conn = DB_CONNECTION.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT * FROM account")?;
+    let mut stmt = conn.prepare("
+        SELECT a.*, ac.account_category_ids
+        FROM account a
+        LEFT JOIN (
+            SELECT account_id, GROUP_CONCAT(category_id) AS account_category_ids
+            FROM account_category
+            GROUP BY account_id
+        ) AS ac ON a.id = ac.account_id"
+    )?;
 
     Ok(_do_query_accounts(&mut stmt, &[])?)
 }
 
-pub(crate) fn query_accounts_by_value(account: &Account, with_liked: bool) -> Result<Vec<Account>> {
-    let mut query = "SELECT * FROM account WHERE 1 = 1".to_string();
+pub(crate) fn query_accounts_by_value(
+    account: &Account,
+    with_liked: bool,
+    category_id: i32,
+) -> Result<Vec<Account>> {
+    let mut query = "
+        SELECT a.*, ac.account_category_ids
+        FROM account a
+        LEFT JOIN (
+            SELECT account_id, GROUP_CONCAT(category_id) AS account_category_ids
+            FROM account_category
+            GROUP BY account_id
+        ) AS ac ON a.id = ac.account_id
+        WHERE 1 = 1
+    "
+    .to_string();
 
     let mut sub_queries = Vec::new();
     let mut params: Vec<(&str, &dyn ToSql)> = Vec::new();
@@ -174,6 +241,12 @@ pub(crate) fn query_accounts_by_value(account: &Account, with_liked: bool) -> Re
         query += &format!(" AND liked = {}", account.liked.unwrap());
     }
 
+    if category_id > 0 {
+        query +=
+            " AND id IN (SELECT account_id FROM account_category WHERE category_id = :category_id)";
+        params.push((":category_id", &category_id));
+    }
+
     let conn = DB_CONNECTION.lock().unwrap();
     let mut stmt = conn.prepare(&query)?;
 
@@ -185,6 +258,15 @@ fn _do_query_accounts(
     params: &[(&str, &dyn ToSql)],
 ) -> Result<Vec<Account>> {
     let rows = stmt.query_map(params, |row| {
+        let account_category_ids: Result<Option<String>> = row.get(8);
+        let account_category_ids: Option<Vec<i32>> = match account_category_ids {
+            Ok(Some(ids_str)) => {
+                let ids: Vec<i32> = ids_str.split(',').filter_map(|s| s.parse().ok()).collect();
+                Some(ids)
+            }
+            _ => Some(Vec::new()),
+        };
+
         Ok(Account {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -194,6 +276,7 @@ fn _do_query_accounts(
             liked: row.get(5)?,
             description: row.get(6)?,
             last_update_time: row.get(7)?,
+            account_category_ids,
         })
     })?;
 
@@ -206,126 +289,118 @@ fn _do_query_accounts(
 }
 
 pub(crate) fn create_category(category: &Category) -> Result<()> {
-    let conn = DB_CONNECTION.lock().unwrap();
+    let conn = &mut DB_CONNECTION.lock().unwrap();
     conn.execute(
         "INSERT INTO category (name, sequence, last_update_time)
         VALUES (?, IFNULL(?, 1), datetime('now'))",
         params![category.name, category.sequence],
     )?;
 
+    let category_id = conn.last_insert_rowid() as i32;
+
+    let batch = conn.transaction()?;
+
+    if let Some(account_ids) = &category.account_ids {
+        for account_id in account_ids {
+            batch.execute(
+                "INSERT INTO account_category (account_id, category_id, last_update_time)
+                    VALUES (?, ?, datetime('now'))",
+                params![account_id, category_id],
+            )?;
+        }
+    }
+
+    batch.commit()?;
+
     Ok(())
 }
 
 pub(crate) fn query_all_categories() -> Result<Vec<Category>> {
     let conn = DB_CONNECTION.lock().unwrap();
-    let mut stmt = conn.prepare("SELECT * FROM category")?;
+    let mut stmt = conn.prepare("
+        SELECT c.*, ac.account_category_ids
+        FROM category c
+        LEFT JOIN (
+            SELECT category_id, GROUP_CONCAT(account_id) AS account_category_ids
+            FROM account_category
+            GROUP BY category_id
+        ) AS ac ON c.id = ac.category_id
+        WHERE 1 = 1
+    ")?;
 
-    Ok(_do_query_categories(&mut stmt, &[])?)
-}
+    let rows = stmt.query_map([], |row| {
+        let account_category_ids: Result<Option<String>> = row.get(4);
+        let account_category_ids: Option<Vec<i32>> = match account_category_ids {
+            Ok(Some(ids_str)) => {
+                let ids: Vec<i32> = ids_str.split(',').filter_map(|s| s.parse().ok()).collect();
+                Some(ids)
+            }
+            _ => Some(Vec::new()),
+        };
 
-fn _do_query_categories(
-    stmt: &mut rusqlite::Statement,
-    params: &[(&str, &dyn ToSql)],
-) -> Result<Vec<Category>> {
-    let rows = stmt.query_map(params, |row| {
         Ok(Category {
             id: row.get(0)?,
             name: row.get(1)?,
             sequence: row.get(2)?,
             last_update_time: row.get(3)?,
+            account_ids: account_category_ids,
         })
     })?;
 
-    let mut groups = Vec::new();
+    let mut categories = Vec::new();
     for row in rows {
-        groups.push(row?);
+        categories.push(row?);
     }
 
-    Ok(groups)
+    Ok(categories)
 }
 
 pub(crate) fn update_category(category: &Category) -> Result<()> {
     if category.id.is_none() {
         create_category(category)?;
     } else {
-        let conn = DB_CONNECTION.lock().unwrap();
-        conn.execute(
+        let conn =&mut DB_CONNECTION.lock().unwrap();
+        let batch = conn.transaction()?;
+
+        batch.execute(
             "UPDATE category SET name = ?, sequence = ? WHERE id = ?",
             params![category.name, category.sequence, category.id],
         )?;
+
+        batch.execute(
+            "DELETE FROM account_category WHERE category_id = ?",
+            params![category.id],
+        )?;
+
+        if let Some(account_ids) = &category.account_ids {
+            for account_id in account_ids {
+                batch.execute(
+                    "INSERT INTO account_category (account_id, category_id, last_update_time)
+                        VALUES (?, ?, datetime('now'))",
+                    params![account_id, category.id],
+                )?;
+            }
+        }
+
+        batch.commit()?;
     }
 
     Ok(())
 }
 
 pub(crate) fn delete_category_by_id(id: i32) -> Result<()> {
-    let conn = DB_CONNECTION.lock().unwrap();
-    conn.execute("DELETE FROM category WHERE id = ?", params![id])?;
-
-    Ok(())
-}
-
-pub(crate) fn batch_create_account_categories(
-    account_id: i32,
-    category_ids: Vec<i32>,
-) -> Result<()> {
     let conn = &mut DB_CONNECTION.lock().unwrap();
     let batch = conn.transaction()?;
+    // delete account_category first
+    batch.execute(
+        "DELETE FROM account_category WHERE category_id = ?",
+        params![id],
+    )?;
+    // then delete category
+    batch.execute("DELETE FROM category WHERE id = ?", params![id])?;
 
-    for category_id in category_ids {
-        batch.execute(
-            "INSERT INTO account_category (account_id, category_id, last_update_time)
-            VALUES (?, ?, datetime('now'))",
-            params![account_id, category_id],
-        )?;
-    }
     batch.commit()?;
 
     Ok(())
 }
 
-pub(crate) fn batch_delete_account_categories(account_category_ids: Vec<i32>) -> Result<()> {
-    let conn = DB_CONNECTION.lock().unwrap();
-
-    conn.execute(
-        &format!(
-            "DELETE FROM account_category WHERE id in ({})",
-            account_category_ids
-                .iter()
-                .map(|it| it.to_string())
-                .collect::<Vec<String>>()
-                .join(",")
-        ),
-        [],
-    )?;
-
-    Ok(())
-}
-
-pub(crate) fn query_categries_by_account_id(account_id: i32) -> Result<Vec<Category>> {
-    let conn = DB_CONNECTION.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT g.id, g.name, g.sequence, g.last_update_time FROM category g
-        INNER JOIN account_category ag ON g.id = ag.category_id
-        WHERE ag.account_id = :account_id",
-    )?;
-
-    Ok(_do_query_categories(
-        &mut stmt,
-        named_params! {":acount":account_id},
-    )?)
-}
-
-pub(crate) fn query_accounts_by_category_id(category_id: i32) -> Result<Vec<Account>> {
-    let conn = DB_CONNECTION.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT a.id, a.name, a.username, a.password, a.sequence, a.liked, a.description, a.last_update_time FROM account a
-        INNER JOIN account_category ag ON a.id = ag.account_id
-        WHERE ag.category_id = :category_id",
-    )?;
-
-    Ok(_do_query_accounts(
-        &mut stmt,
-        named_params! {":category_id":category_id},
-    )?)
-}
