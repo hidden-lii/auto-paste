@@ -1,5 +1,5 @@
 <script setup lang='ts'>
-import {ref, onMounted} from 'vue';
+import {onMounted, ref} from 'vue';
 import {invoke} from '@tauri-apps/api/tauri';
 import {writeText} from '@tauri-apps/api/clipboard';
 import {Account} from '../entity/account';
@@ -35,6 +35,8 @@ const insert_category_info = ref<Category>(new Category(null, ''));
 const update_category_info = ref<Category>(new Category(null, ''));
 const createConfirm = useConfirm();
 const createSnackbar = useSnackbar();
+const hide_username = ref(true);
+const hide_password = ref(true);
 
 function clear_insert_account_info() {
   insert_account_info.value = new Account();
@@ -462,6 +464,51 @@ async function on_delete_category() {
       });
 }
 
+function on_hide_username_click() {
+  hide_username.value = !hide_username.value;
+  if (hide_username.value) {
+    show_common_snackbar('关闭展示完整用户名', 'warning');
+  } else {
+    show_common_snackbar('开启展示完整用户名', 'success');
+  }
+}
+
+function on_hide_password_click() {
+  hide_password.value = !hide_password.value
+  if (hide_password.value) {
+    show_common_snackbar('关闭展示明文密码', 'warning');
+  } else {
+    show_common_snackbar('开启展示明文密码', 'success');
+  }
+}
+
+function encrypt_username(username: string) {
+  // 获取用户名长度
+  const length = username.length;
+
+  // 计算第一份和第三份的长度
+  const firstThirdLength = Math.round(length * 0.2);
+
+  // 截取第一份
+  const firstPart = username.substring(0, firstThirdLength);
+
+  // 截取最后一份
+  const lastPart = username.substring(length - firstThirdLength);
+
+  // 计算中间部分的长度
+  const middlePartLength = length - 2 * firstThirdLength;
+
+  // 生成*号替代的中间部分
+  const middlePart = '*'.repeat(middlePartLength);
+
+  // 拼接加密后的用户名
+  return firstPart + middlePart + lastPart;
+}
+
+function encrypt_password(password: string) {
+  return '*'.repeat(password.length)
+}
+
 onMounted(() => {
   query_all_accounts(false);
   query_all_categories(false);
@@ -609,7 +656,18 @@ onMounted(() => {
 
                 <v-card-text>
                   <v-row dense>
-                    <v-col cols='12'>
+                    <!-- username start-->
+                    <v-col cols='12' v-if="hide_username">
+                      <v-btn
+                          variant='tonal'
+                          @click.stop
+                          @click='on_click_copy(item.username)'
+                          width='100%'
+                          class='text-none'>
+                        {{ encrypt_username(item.username) }}
+                      </v-btn>
+                    </v-col>
+                    <v-col cols='12' v-if="!hide_username">
                       <v-btn
                           variant='tonal'
                           @click.stop
@@ -619,7 +677,20 @@ onMounted(() => {
                         {{ item.username }}
                       </v-btn>
                     </v-col>
-                    <v-col cols='12'>
+                    <!-- username end-->
+
+                    <!-- password start-->
+                    <v-col cols='12' v-if="hide_password">
+                      <v-btn
+                          variant='tonal'
+                          @click.stop
+                          @click='on_click_copy(item.password)'
+                          width='100%'
+                          class='text-none'>
+                        {{ encrypt_password(item.password) }}
+                      </v-btn>
+                    </v-col>
+                    <v-col cols='12' v-if="!hide_password">
                       <v-btn
                           variant='tonal'
                           @click.stop
@@ -629,6 +700,7 @@ onMounted(() => {
                         {{ item.password }}
                       </v-btn>
                     </v-col>
+                    <!-- password end-->
                   </v-row>
                 </v-card-text>
                 <v-expand-transition>
@@ -838,7 +910,7 @@ onMounted(() => {
       </v-card>
     </v-dialog>
 
-    <!-- #insert categroy dialog -->
+    <!-- #insert category dialog -->
     <v-dialog v-model='dialog_insert_category' persistent>
       <v-card class='mx-12 dialog-card' density='compact'>
         <v-card-title>添加分组</v-card-title>
@@ -970,11 +1042,22 @@ onMounted(() => {
     </v-dialog>
   </div>
 
-  <!-- footbar -->
+  <!-- foot-bar -->
   <v-toolbar density='comfortable'>
     <template v-slot:prepend>
+      <!-- #insert account btn-->
       <v-btn size='small' icon @click='dialog_insert = true'>
         <v-icon icon='mdi-account-plus'></v-icon>
+      </v-btn>
+      <!-- #show/hide username info-->
+      <v-btn size='small' icon @click='on_hide_username_click()' style="margin-left: 5px">
+        <v-icon v-if="hide_username" icon='mdi-account-off'></v-icon>
+        <v-icon v-if="!hide_username" icon='mdi-account'></v-icon>
+      </v-btn>
+      <!-- #show/hide password info-->
+      <v-btn size='small' icon @click='on_hide_password_click()' style="margin-left: 5px">
+        <v-icon v-if="hide_password" icon='mdi-lock-off'></v-icon>
+        <v-icon v-if="!hide_password" icon='mdi-lock'></v-icon>
       </v-btn>
     </template>
     <v-btn
