@@ -54,8 +54,13 @@ function onDragEnd() {
 				tag="div"
 				class="account-grid"
 				:disabled="!draggableEnabled"
-				filter=".no-drag"
-				:prevent-on-filter="false"
+				handle=".drag-handle"
+				:force-fallback="true"
+				:fallback-on-body="true"
+				:delay="80"
+				:delay-on-touch-only="false"
+				ghost-class="sortable-ghost"
+				chosen-class="sortable-chosen"
 				@start="onDragStart"
 				@end="onDragEnd"
 			>
@@ -85,6 +90,11 @@ function onDragEnd() {
 	overflow-x: hidden;
 	overscroll-behavior: contain;
 	-webkit-overflow-scrolling: touch;
+	scrollbar-width: none;
+}
+
+.account-list::-webkit-scrollbar {
+	display: none;
 }
 
 .account-list-inner {
@@ -101,5 +111,13 @@ function onDragEnd() {
 	box-sizing: border-box;
 	width: 50%;
 	padding: 4px;
+}
+
+:deep(.sortable-ghost) {
+	opacity: 0.45;
+}
+
+:deep(.sortable-chosen) {
+	z-index: 3;
 }
 </style>

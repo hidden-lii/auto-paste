@@ -170,6 +170,55 @@ fn save_window_size(width: u32, height: u32) -> bool {
     true
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct DisplaySettings {
+    hide_username: bool,
+    hide_password: bool,
+}
+
+#[tauri::command]
+fn get_display_settings() -> DisplaySettings {
+    match sqlite::get_display_settings() {
+        Ok((hide_username, hide_password)) => DisplaySettings {
+            hide_username,
+            hide_password,
+        },
+        Err(e) => {
+            println!("get_display_settings error: {:?}", e);
+            DisplaySettings {
+                hide_username: false,
+                hide_password: true,
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn save_display_settings(hide_username: bool, hide_password: bool) -> bool {
+    if let Err(e) = sqlite::save_display_settings(hide_username, hide_password) {
+        println!("save_display_settings error: {:?}", e);
+        return false;
+    }
+
+    true
+}
+
+#[tauri::command]
+fn get_app_version() -> String {
+    match sqlite::get_app_version() {
+        Ok(version) => version,
+        Err(e) => {
+            println!("get_app_version error: {:?}", e);
+            "0.0.0".to_string()
+        }
+    }
+}
+
+#[tauri::command]
+fn get_current_app_version() -> String {
+    sqlite::get_current_app_version().to_string()
+}
+
 #[tauri::command]
 fn get_default_window_size() -> WindowSize {
     #[cfg(target_os = "macos")]
@@ -200,8 +249,7 @@ fn get_default_window_size() -> WindowSize {
 // }
 
 fn main() {
-    // 先创建db文件
-    sqlite::create_if_not_exists().expect("create_if_not_exists error");
+    sqlite::initialize_database().expect("数据库初始化失败");
     // 这里 `"quit".to_string()` 定义菜单项 ID，第二个参数是菜单项标签。
     // let quit = CustomMenuItem::new("quit".to_string(), "Quit");
     // let close = CustomMenuItem::new("close".to_string(), "Close");
@@ -255,7 +303,11 @@ fn main() {
             reorder_categories,
             get_saved_window_size,
             save_window_size,
-            get_default_window_size
+            get_default_window_size,
+            get_display_settings,
+            save_display_settings,
+            get_app_version,
+            get_current_app_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

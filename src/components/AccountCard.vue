@@ -52,7 +52,12 @@ const emit = defineEmits<{
 		</v-card-title>
 
 		<v-card-subtitle class="account-card-subtitle">
-			优先级: {{ account.sequence }}
+			<div v-if="draggable" class="drag-handle" @click.stop>
+				<v-icon icon="mdi-drag" size="small" />
+			</div>
+			<span class="account-card-priority">
+				优先级: {{ account.sequence }}
+			</span>
 		</v-card-subtitle>
 
 		<v-card-text>
@@ -105,12 +110,29 @@ const emit = defineEmits<{
 }
 
 .account-card--draggable {
-	cursor: grab;
 	user-select: none;
 }
 
-.account-card--draggable:active {
+.drag-handle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 4px;
+	color: rgba(255, 255, 255, 0.55);
+	cursor: grab;
+	touch-action: none;
+	flex-shrink: 0;
+}
+
+.drag-handle:active {
 	cursor: grabbing;
+}
+
+.drag-handle:hover {
+	color: rgba(255, 255, 255, 0.85);
+	background: rgba(255, 255, 255, 0.08);
 }
 
 .account-card-actions {
@@ -165,8 +187,16 @@ const emit = defineEmits<{
 }
 
 .account-card-subtitle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
 	padding-top: 0;
 	text-align: center;
 	user-select: none;
+}
+
+.account-card-priority {
+	line-height: 1.2;
 }
 </style>

@@ -8,7 +8,6 @@ const account = defineModel<Account>('account', { required: true });
 defineProps<{
 	mode: 'insert' | 'update';
 	categories: Category[];
-	sequences: number[];
 	likes: { value: boolean; title: string }[];
 }>();
 
@@ -18,8 +17,36 @@ const emit = defineEmits<{
 }>();
 
 const rules = {
-	required: (v: string) => !!v || v !== '' || '该项必填!'
+	required: (v: string) => !!v || v !== '' || '该项必填!',
+	numeric: (v: string | number) => {
+		if (v === '' || v === null || v === undefined) {
+			return '请输入优先级数字';
+		}
+		const num = Number(v);
+		if (!Number.isInteger(num) || num < 1) {
+			return '请输入正整数';
+		}
+		return true;
+	}
 };
+
+function preventNonDigitInput(event: KeyboardEvent) {
+	const allowedKeys = [
+		'Backspace',
+		'Delete',
+		'Tab',
+		'ArrowLeft',
+		'ArrowRight',
+		'Home',
+		'End'
+	];
+	if (allowedKeys.includes(event.key) || event.ctrlKey || event.metaKey) {
+		return;
+	}
+	if (!/^\d$/.test(event.key)) {
+		event.preventDefault();
+	}
+}
 </script>
 
 <template>
@@ -70,12 +97,17 @@ const rules = {
 						density="compact"
 						variant="solo-filled"
 					/>
-					<v-select
-						v-model="account.sequence"
-						label="选择账号优先级(用于排序)"
-						:items="sequences"
+					<v-text-field
+						v-model.number="account.sequence"
+						label="账号优先级(用于排序)"
+						type="number"
+						min="1"
+						step="1"
+						inputmode="numeric"
 						density="compact"
 						variant="solo-filled"
+						:rules="[rules.numeric]"
+						@keydown="preventNonDigitInput"
 					/>
 					<v-autocomplete
 						v-model="account.account_category_ids"

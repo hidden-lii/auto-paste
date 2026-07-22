@@ -26,6 +26,7 @@ import AccountFormDialog from '../components/AccountFormDialog.vue';
 import CategoryFormDialog from '../components/CategoryFormDialog.vue';
 import AppFooterToolbar from '../components/AppFooterToolbar.vue';
 import AppFunctionPanel from '../components/AppFunctionPanel.vue';
+import { loadDisplaySettings, persistDisplaySettings } from '../utils/display';
 
 const { showConfirm, showSnackbar } = useFeedback();
 
@@ -41,7 +42,6 @@ const dialogInsert = ref(false);
 const dialogUpdate = ref(false);
 const dialogInsertCategory = ref(false);
 const dialogUpdateCategory = ref(false);
-const sequences = Array.from({ length: 10 }, (_, index) => index + 1);
 const likes = [
 	{ value: true, title: '喜欢' },
 	{ value: false, title: '普通' }
@@ -51,8 +51,10 @@ const insertAccountInfo = ref<Account>(new Account());
 const updateAccountInfo = ref<Account>(new Account());
 const updateAccountSnapshot = ref<Account | null>(null);
 const insertCategoryInfo = ref<Category>(new Category(null, ''));
-const hideUsername = ref(true);
+const hideUsername = ref(false);
 const hidePassword = ref(true);
+const defaultHideUsername = ref(false);
+const defaultHidePassword = ref(true);
 const alwaysOnTop = ref(false);
 
 const draggableEnabled = computed(
@@ -491,6 +493,26 @@ function onHideUsernameClick() {
 	);
 }
 
+async function onDefaultHideUsernameChange(value: boolean) {
+	defaultHideUsername.value = value;
+	hideUsername.value = value;
+	await persistDisplaySettings(hideUsername.value, hidePassword.value);
+	showSnackbar(
+		value ? '默认隐藏用户名' : '默认显示用户名',
+		'success'
+	);
+}
+
+async function onDefaultHidePasswordChange(value: boolean) {
+	defaultHidePassword.value = value;
+	hidePassword.value = value;
+	await persistDisplaySettings(hideUsername.value, hidePassword.value);
+	showSnackbar(
+		value ? '默认隐藏密码' : '默认显示密码',
+		value ? 'warning' : 'success'
+	);
+}
+
 async function toggleAlwaysOnTop() {
 	alwaysOnTop.value = !alwaysOnTop.value;
 	await appWindow.setAlwaysOnTop(alwaysOnTop.value);
@@ -508,7 +530,16 @@ function onHidePasswordClick() {
 	);
 }
 
+async function loadDisplayPreferences() {
+	const settings = await loadDisplaySettings();
+	hideUsername.value = settings.hideUsername;
+	hidePassword.value = settings.hidePassword;
+	defaultHideUsername.value = settings.hideUsername;
+	defaultHidePassword.value = settings.hidePassword;
+}
+
 onMounted(async () => {
+	await loadDisplayPreferences();
 	await loadAllAccounts(false, true);
 	await loadAllCategories(false);
 });
@@ -550,7 +581,6 @@ onMounted(async () => {
 			v-model:account="insertAccountInfo"
 			mode="insert"
 			:categories="availableCategories"
-			:sequences="sequences"
 			:likes="likes"
 			@quit="onInsertQuit"
 			@save="onInsertAccountSave"
@@ -561,7 +591,6 @@ onMounted(async () => {
 			v-model:account="updateAccountInfo"
 			mode="update"
 			:categories="availableCategories"
-			:sequences="sequences"
 			:likes="likes"
 			@quit="onUpdateQuit"
 			@save="onUpdateAccountSave"
@@ -572,7 +601,6 @@ onMounted(async () => {
 			v-model:category="insertCategoryInfo"
 			mode="insert"
 			:accounts="availableAccounts"
-			:sequences="sequences"
 			@quit="onInsertCategoryQuit"
 			@save="onInsertCategorySave"
 		/>
@@ -582,7 +610,6 @@ onMounted(async () => {
 			v-model:category="selectedCategory"
 			mode="update"
 			:accounts="availableAccounts"
-			:sequences="sequences"
 			@quit="onUpdateCategoryQuit"
 			@save="onUpdateCategorySave"
 		/>
@@ -592,8 +619,12 @@ onMounted(async () => {
 			<AppFunctionPanel
 				:hide-username="hideUsername"
 				:hide-password="hidePassword"
+				:default-hide-username="defaultHideUsername"
+				:default-hide-password="defaultHidePassword"
 				@toggle-username="onHideUsernameClick"
 				@toggle-password="onHidePasswordClick"
+				@update:default-hide-username="onDefaultHideUsernameChange"
+				@update:default-hide-password="onDefaultHidePasswordChange"
 			/>
 			<AppFooterToolbar
 				class="footer-toolbar"

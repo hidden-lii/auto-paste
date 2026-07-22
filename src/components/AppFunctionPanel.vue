@@ -6,11 +6,15 @@ import { useWindowSize } from '../composables/useWindowSize';
 const props = defineProps<{
 	hideUsername: boolean;
 	hidePassword: boolean;
+	defaultHideUsername: boolean;
+	defaultHidePassword: boolean;
 }>();
 
 const emit = defineEmits<{
 	'toggle-username': [];
 	'toggle-password': [];
+	'update:default-hide-username': [value: boolean];
+	'update:default-hide-password': [value: boolean];
 }>();
 
 const expanded = ref(false);
@@ -43,6 +47,20 @@ function onTogglePassword() {
 	emit('toggle-password');
 }
 
+function onDefaultHideUsernameChange(value: boolean | null | undefined) {
+	if (typeof value !== 'boolean') {
+		return;
+	}
+	emit('update:default-hide-username', value);
+}
+
+function onDefaultHidePasswordChange(value: boolean | null | undefined) {
+	if (typeof value !== 'boolean') {
+		return;
+	}
+	emit('update:default-hide-password', value);
+}
+
 async function onWindowSizeRestored() {
 	await refresh();
 }
@@ -62,6 +80,35 @@ async function onWindowSizeRestored() {
 					:prepend-icon="hidePassword ? 'mdi-lock-off' : 'mdi-lock'"
 					@click="onTogglePassword"
 				/>
+				<v-divider class="my-1" />
+				<v-list-subheader class="function-menu-subheader">
+					默认显示设置
+				</v-list-subheader>
+				<v-list-item title="默认隐藏用户名" class="function-menu-switch">
+					<template #append>
+						<v-switch
+							:model-value="defaultHideUsername"
+							density="compact"
+							hide-details
+							color="primary"
+							@click.stop
+							@update:model-value="onDefaultHideUsernameChange"
+						/>
+					</template>
+				</v-list-item>
+				<v-list-item title="默认隐藏密码" class="function-menu-switch">
+					<template #append>
+						<v-switch
+							:model-value="defaultHidePassword"
+							density="compact"
+							hide-details
+							color="primary"
+							@click.stop
+							@update:model-value="onDefaultHidePasswordChange"
+						/>
+					</template>
+				</v-list-item>
+				<v-divider class="my-1" />
 				<v-list-item
 					title="窗口大小"
 					prepend-icon="mdi-resize"
@@ -107,9 +154,24 @@ async function onWindowSizeRestored() {
 	position: absolute;
 	bottom: 100%;
 	left: 0;
-	width: 180px;
+	width: 220px;
 	padding: 0;
 	background: rgb(var(--v-theme-surface));
 	box-shadow: none;
+}
+
+.function-menu-subheader {
+	min-height: 28px;
+	padding-top: 4px;
+	padding-bottom: 0;
+	font-size: 0.75rem;
+}
+
+.function-menu-switch {
+	min-height: 40px;
+}
+
+.function-menu-switch :deep(.v-list-item__append) {
+	margin-inline-start: 8px;
 }
 </style>
