@@ -27,6 +27,11 @@
           "open": true,
           "message": true,
           "confirm": true
+        },
+        "window": {
+          "all": false,
+          "setAlwaysOnTop": true,
+          "setSize": true
         }
       },
       "bundle": {
@@ -47,7 +52,8 @@
       "windows": [
         {
           "fullscreen": false,
-          "resizable": false,
+          "resizable": true,
+          "visible": false,
           "center": true,
           "title": "AUTO PASTE",
           "width": 460,

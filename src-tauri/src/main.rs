@@ -11,7 +11,15 @@ mod entity {
 
 use crate::entity::account::Account;
 use crate::entity::category::Category;
+use serde::{Deserialize, Serialize};
+use tauri::{LogicalSize, Manager, Size};
 // use tauri::{CustomMenuItem, Menu, MenuItem, Submenu};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WindowSize {
+    width: u32,
+    height: u32,
+}
 
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
@@ -120,6 +128,61 @@ fn delete_category_by_id(id: i32) -> bool {
     true
 }
 
+#[tauri::command]
+fn reorder_accounts(ids: Vec<i32>) -> bool {
+    if let Err(e) = sqlite::reorder_accounts(&ids) {
+        println!("{}", format!("reorder_accounts error: {:?}", e));
+        return false;
+    }
+
+    true
+}
+
+#[tauri::command]
+fn reorder_categories(ids: Vec<i32>) -> bool {
+    if let Err(e) = sqlite::reorder_categories(&ids) {
+        println!("{}", format!("reorder_categories error: {:?}", e));
+        return false;
+    }
+
+    true
+}
+
+#[tauri::command]
+fn get_saved_window_size() -> Option<WindowSize> {
+    match sqlite::get_window_size() {
+        Ok(Some((width, height))) => Some(WindowSize { width, height }),
+        Ok(None) => None,
+        Err(e) => {
+            println!("get_saved_window_size error: {:?}", e);
+            None
+        }
+    }
+}
+
+#[tauri::command]
+fn save_window_size(width: u32, height: u32) -> bool {
+    if let Err(e) = sqlite::save_window_size(width, height) {
+        println!("save_window_size error: {:?}", e);
+        return false;
+    }
+
+    true
+}
+
+#[tauri::command]
+fn get_default_window_size() -> WindowSize {
+    #[cfg(target_os = "macos")]
+    let height = 761u32;
+    #[cfg(not(target_os = "macos"))]
+    let height = 732u32;
+
+    WindowSize {
+        width: 460,
+        height,
+    }
+}
+
 // fn main() {
 //     match insert(Account {
 //         id: None,
@@ -162,6 +225,21 @@ fn main() {
         //         _ => {}
         //     }
         // })
+        .setup(|app| {
+            let window = app
+                .get_window("main")
+                .expect("main window not found");
+
+            if let Ok(Some((width, height))) = sqlite::get_window_size() {
+                let _ = window.set_size(Size::Logical(LogicalSize::new(
+                    width as f64,
+                    height as f64,
+                )));
+            }
+
+            let _ = window.show();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             query_all_accounts,
             delete_account,
@@ -172,7 +250,12 @@ fn main() {
             create_category,
             query_all_category,
             update_category,
-            delete_category_by_id
+            delete_category_by_id,
+            reorder_accounts,
+            reorder_categories,
+            get_saved_window_size,
+            save_window_size,
+            get_default_window_size
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

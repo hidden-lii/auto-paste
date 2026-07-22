@@ -81,6 +81,14 @@ pub(crate) fn create_if_not_exists() -> Result<()> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_setting (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -197,7 +205,8 @@ pub(crate) fn query_all_accounts() -> Result<Vec<Account>> {
             SELECT account_id, GROUP_CONCAT(category_id) AS account_category_ids
             FROM account_category
             GROUP BY account_id
-        ) AS ac ON a.id = ac.account_id"
+        ) AS ac ON a.id = ac.account_id
+        ORDER BY a.sequence ASC, a.id ASC"
     )?;
 
     Ok(_do_query_accounts(&mut stmt, &[])?)
@@ -246,6 +255,8 @@ pub(crate) fn query_accounts_by_value(
             " AND id IN (SELECT account_id FROM account_category WHERE category_id = :category_id)";
         params.push((":category_id", &category_id));
     }
+
+    query += " ORDER BY a.sequence ASC, a.id ASC";
 
     let conn = DB_CONNECTION.lock().unwrap();
     let mut stmt = conn.prepare(&query)?;
@@ -326,6 +337,7 @@ pub(crate) fn query_all_categories() -> Result<Vec<Category>> {
             GROUP BY category_id
         ) AS ac ON c.id = ac.category_id
         WHERE 1 = 1
+        ORDER BY c.sequence ASC, c.id ASC
     ")?;
 
     let rows = stmt.query_map([], |row| {
@@ -401,6 +413,75 @@ pub(crate) fn delete_category_by_id(id: i32) -> Result<()> {
 
     batch.commit()?;
 
+    Ok(())
+}
+
+pub(crate) fn reorder_accounts(ids: &[i32]) -> Result<()> {
+    let conn = &mut DB_CONNECTION.lock().unwrap();
+    let batch = conn.transaction()?;
+
+    for (index, id) in ids.iter().enumerate() {
+        batch.execute(
+            "UPDATE account SET sequence = ? WHERE id = ?",
+            params![(index + 1) as i32, id],
+        )?;
+    }
+
+    batch.commit()?;
+
+    Ok(())
+}
+
+pub(crate) fn reorder_categories(ids: &[i32]) -> Result<()> {
+    let conn = &mut DB_CONNECTION.lock().unwrap();
+    let batch = conn.transaction()?;
+
+    for (index, id) in ids.iter().enumerate() {
+        batch.execute(
+            "UPDATE category SET sequence = ? WHERE id = ?",
+            params![(index + 1) as i32, id],
+        )?;
+    }
+
+    batch.commit()?;
+
+    Ok(())
+}
+
+pub(crate) fn get_setting(key: &str) -> Result<Option<String>> {
+    let conn = DB_CONNECTION.lock().unwrap();
+    let mut stmt = conn.prepare("SELECT value FROM app_setting WHERE key = ?1")?;
+    let mut rows = stmt.query(params![key])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub(crate) fn set_setting(key: &str, value: &str) -> Result<()> {
+    let conn = DB_CONNECTION.lock().unwrap();
+    conn.execute(
+        "INSERT INTO app_setting (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn get_window_size() -> Result<Option<(u32, u32)>> {
+    let width = get_setting("window_width")?.and_then(|value| value.parse().ok());
+    let height = get_setting("window_height")?.and_then(|value| value.parse().ok());
+
+    match (width, height) {
+        (Some(width), Some(height)) if width > 0 && height > 0 => Ok(Some((width, height))),
+        _ => Ok(None),
+    }
+}
+
+pub(crate) fn save_window_size(width: u32, height: u32) -> Result<()> {
+    set_setting("window_width", &width.to_string())?;
+    set_setting("window_height", &height.to_string())?;
     Ok(())
 }
 

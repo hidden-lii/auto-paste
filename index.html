@@ -7,19 +7,23 @@
     <title>Tauri + Vue + TS</title>
 </head>
 
-<body style=" background-color: #2f2f2f;">
+<body style="background-color: #2f2f2f; overflow: hidden;">
 <div id="app"></div>
 <script type="module" src="/src/main.ts"></script>
 <style>
     /* hide scrollbar on Windows */
     html,
     body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
         -ms-overflow-style: none;
         scrollbar-width: none;
     }
 
     /* Hide scrollbar for Chrome, Safari and Opera */
-    ::-webkit-scrollbar {
+    html::-webkit-scrollbar,
+    body::-webkit-scrollbar {
         display: none;
     }
 </style>

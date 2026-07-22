@@ -1,20 +1,48 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import AccountPage from './pages/AccountPage.vue';
+import { migrateWindowSizeFromLocalStorage, normalizeSavedWindowSize } from './utils/window';
 
-// 禁止右键菜单的出现
 function disableContextMenu(event: { preventDefault: () => void }) {
 	event.preventDefault();
 }
 
-// This starter template is using Vue 3 <script setup> SFCs
-// Check out https://vuejs.org/api/sfc-script-setup.html#script-setup
+onMounted(async () => {
+	await migrateWindowSizeFromLocalStorage();
+	await normalizeSavedWindowSize();
+});
 </script>
 
 <template>
 	<v-app @contextmenu="disableContextMenu">
-		<account-page />
+		<v-main class="app-main">
+			<account-page />
+		</v-main>
 	</v-app>
 </template>
 
-<style scoped>
+<style>
+html,
+body,
+#app {
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+.v-application {
+	height: 100% !important;
+}
+
+.v-application__wrap {
+	min-height: 0 !important;
+	height: 100%;
+	overflow: hidden;
+}
+
+.app-main {
+	height: 100%;
+	padding: 0 !important;
+	overflow: hidden;
+}
 </style>

@@ -1,1124 +1,655 @@
-<script setup lang='ts'>
-import {onMounted, ref} from 'vue';
-import {invoke} from '@tauri-apps/api/tauri';
-import {writeText} from '@tauri-apps/api/clipboard';
-import {Account} from '../entity/account';
-import {useConfirm, useSnackbar} from 'vuetify-use-dialog';
-import {Category} from '../entity/category';
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue';
+import { writeText } from '@tauri-apps/api/clipboard';
+import { appWindow } from '@tauri-apps/api/window';
+import { Account } from '../entity/account';
+import { Category } from '../entity/category';
+import { useFeedback } from '../utils/feedback';
+import {
+	deleteAccount,
+	insertAccount,
+	queryAccountsByValue,
+	queryAllAccounts,
+	reorderAccounts,
+	updateAccount,
+	updateLike
+} from '../api/account';
+import {
+	createCategory,
+	deleteCategoryById,
+	queryAllCategories,
+	updateCategory
+} from '../api/category';
+import AccountSearchBar from '../components/AccountSearchBar.vue';
+import CategoryAccountPanel from '../components/CategoryAccountPanel.vue';
+import AccountFormDialog from '../components/AccountFormDialog.vue';
+import CategoryFormDialog from '../components/CategoryFormDialog.vue';
+import AppFooterToolbar from '../components/AppFooterToolbar.vue';
+import AppFunctionPanel from '../components/AppFunctionPanel.vue';
 
-const available_accounts = ref<Account[]>([]);
+const { showConfirm, showSnackbar } = useFeedback();
+
+const availableAccounts = ref<Account[]>([]);
 const accounts = ref<Account[]>([]);
-const types = ref(['全部', '名称', '账号']);
+const types = ['全部', '名称', '账号'];
 const categories = ref<Category[]>([new Category(-1, '全部')]);
-const available_categories = ref<Category[]>([]);
-const selected_type = ref('全部');
-const selected_category = ref(new Category(-1, '全部'));
-const liked = ref(false);
-const like_type = ref(0);
-const dialog_insert = ref(false);
-const dialog_update = ref(false);
-const dialog_insert_category = ref(false);
-const dialog_update_category = ref(false);
-const sequences = ref(Array.from({length: 10}, (k, v) => v + 1));
-const likes = ref([
-  {value: true, title: '喜欢'},
-  {value: false, title: '普通'}
-]);
+const availableCategories = ref<Category[]>([]);
+const selectedType = ref('全部');
+const selectedCategory = ref(new Category(-1, '全部'));
+const likeType = ref(0);
+const dialogInsert = ref(false);
+const dialogUpdate = ref(false);
+const dialogInsertCategory = ref(false);
+const dialogUpdateCategory = ref(false);
+const sequences = Array.from({ length: 10 }, (_, index) => index + 1);
+const likes = [
+	{ value: true, title: '喜欢' },
+	{ value: false, title: '普通' }
+];
 const keyword = ref('');
-const show_category_select = ref(true);
-const rules = ref({
-  required: (v: string) => !!v || v !== '' || '该项必填!'
-});
-const insert_account_info = ref<Account>(new Account());
-const update_account_info = ref<Account>(new Account());
-const insert_category_info = ref<Category>(new Category(null, ''));
-const update_category_info = ref<Category>(new Category(null, ''));
-const createConfirm = useConfirm();
-const createSnackbar = useSnackbar();
-const hide_username = ref(true);
-const hide_password = ref(true);
+const insertAccountInfo = ref<Account>(new Account());
+const updateAccountInfo = ref<Account>(new Account());
+const updateAccountSnapshot = ref<Account | null>(null);
+const insertCategoryInfo = ref<Category>(new Category(null, ''));
+const hideUsername = ref(true);
+const hidePassword = ref(true);
+const alwaysOnTop = ref(false);
 
-function clear_insert_account_info() {
-  insert_account_info.value = new Account();
+const draggableEnabled = computed(
+	() =>
+		!keyword.value &&
+		(selectedCategory.value.id === -1 || selectedCategory.value.id === null) &&
+		likeType.value === 0
+);
+
+function clearInsertAccountInfo() {
+	insertAccountInfo.value = new Account();
 }
 
-function clear_update_account_info() {
-  update_account_info.value = new Account();
+function clearUpdateAccountInfo() {
+	updateAccountInfo.value = new Account();
+	updateAccountSnapshot.value = null;
 }
 
-function clear_insert_category_info() {
-  insert_category_info.value = new Category(null, '');
+function cloneAccountForEdit(account: Account): Account {
+	return {
+		...account,
+		account_category_ids: [...(account.account_category_ids ?? [])]
+	};
 }
 
-function clear_update_category_info() {
-  update_category_info.value = new Category(null, '');
+function isSameIdList(left: number[], right: number[]): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	const sortedLeft = [...left].sort((a, b) => a - b);
+	const sortedRight = [...right].sort((a, b) => a - b);
+	return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 
-function toggle_show_category_select() {
-  show_category_select.value = !show_category_select.value;
+function isAccountUnchanged(current: Account, snapshot: Account): boolean {
+	return (
+		current.name === snapshot.name &&
+		current.username === snapshot.username &&
+		current.password === snapshot.password &&
+		(current.description ?? '') === (snapshot.description ?? '') &&
+		current.liked === snapshot.liked &&
+		current.sequence === snapshot.sequence &&
+		isSameIdList(
+			current.account_category_ids ?? [],
+			snapshot.account_category_ids ?? []
+		)
+	);
 }
 
-function show_common_confirm(
-    content: string,
-    title: string,
-    confirmationText: string = '确认',
-    cancellationText: string = '取消'
+function isCategoryUnchanged(current: Category, snapshot: Category): boolean {
+	return (
+		current.name === snapshot.name &&
+		(current.sequence ?? null) === (snapshot.sequence ?? null) &&
+		isSameIdList(current.account_ids ?? [], snapshot.account_ids ?? [])
+	);
+}
+
+function closeUpdateDialog() {
+	dialogUpdate.value = false;
+	clearUpdateAccountInfo();
+}
+
+function clearInsertCategoryInfo() {
+	insertCategoryInfo.value = new Category(null, '');
+}
+
+async function loadAllAccounts(
+	showSnackbarMsg = true,
+	updateAccounts = true
 ) {
-  return createConfirm({
-    content: content,
-    title: title,
-    confirmationText: confirmationText,
-    cancellationText: cancellationText,
-    dialogProps: {
-      persistent: true
-    }
-  });
+	const result = await queryAllAccounts();
+	availableAccounts.value = result;
+	if (updateAccounts) {
+		accounts.value = result;
+	}
+	if (showSnackbarMsg) {
+		showSnackbar('查询成功', 'success');
+	}
 }
 
-function show_common_snackbar(
-    text: string,
-    color: string,
-    timeout: number = 1000,
-    showCloseButton: boolean = false
-) {
-  createSnackbar({
-    text: text,
-    snackbarProps: {
-      timeout: timeout,
-      color: color,
-      minWidth: 'fit-content',
-      maxWidth: 'fit-content'
-    },
-    showCloseButton: showCloseButton
-  });
+async function loadAccountsByValue(showSnackbarMsg = true) {
+	const account = new Account();
+	if (likeType.value === 1) {
+		account.liked = true;
+	} else if (likeType.value === 2) {
+		account.liked = false;
+	}
+	if (selectedType.value === '全部') {
+		account.name = keyword.value;
+		account.username = keyword.value;
+	} else if (selectedType.value === '名称') {
+		account.name = keyword.value;
+	} else if (selectedType.value === '账号') {
+		account.username = keyword.value;
+	}
+
+	const result = await queryAccountsByValue(
+		account,
+		likeType.value > 0,
+		selectedCategory.value.id
+	);
+	accounts.value = result;
+	if (showSnackbarMsg) {
+		showSnackbar('查询成功', 'success');
+	}
 }
 
-async function on_insert_category_quit() {
-  const quit = await show_common_confirm(
-      '分组还没有保存, 确认退出吗?',
-      '添加分组'
-  );
-
-  if (!quit) {
-    return;
-  }
-
-  dialog_insert_category.value = false;
-  clear_insert_category_info();
+async function loadAllCategories(showSnackbarMsg = true) {
+	const result = await queryAllCategories();
+	categories.value = [new Category(-1, '全部'), ...result];
+	availableCategories.value = result;
+	if (showSnackbarMsg) {
+		showSnackbar('查询成功', 'success');
+	}
 }
 
-async function on_insert_category_save() {
-  let insert_value = {...insert_category_info.value};
-
-  if (!insert_value.name || insert_value.name === '') {
-    show_common_snackbar('添加分组失败: 名称 为空', 'error');
-    return;
-  }
-  await invoke('create_category', {category: insert_value})
-      .then((res) => {
-        if (!!res && typeof res === 'boolean' && res) {
-          dialog_insert_category.value = false;
-          show_common_snackbar('添加分组成功', 'success');
-          // 添加分组时,可能会增加分组和账号的关系,所以账号信息也要重新查询一遍
-          query_accounts_by_value(false);
-          // 更新分组信息
-          query_all_categories(false);
-          // 更新所有账号信息(用于分组信息更新时的选取)
-          query_all_accounts(false, false);
-          clear_insert_category_info();
-        } else {
-          show_common_snackbar('添加分组失败: 未知原因', 'error');
-        }
-      })
-      .catch((err: unknown) => {
-        show_common_snackbar('添加分组失败: ' + JSON.stringify(err), 'error');
-      });
+async function refreshData() {
+	await Promise.all([
+		loadAllAccounts(true, true),
+		loadAllCategories(true)
+	]);
 }
 
-async function on_update_category_quit() {
-  const quit = await show_common_confirm(
-      '分组信息还没有保存, 确认退出吗?',
-      '修改分组'
-  );
-
-  if (!quit) {
-    return;
-  }
-
-  dialog_update_category.value = false;
-  clear_update_category_info();
+async function onCategoryChange(category: Category) {
+	selectedCategory.value = category;
+	await loadAccountsByValue(false);
 }
 
-async function on_update_category_save() {
-  let update_value = {...selected_category.value};
+async function onInsertCategoryQuit() {
+	if (isCategoryUnchanged(insertCategoryInfo.value, new Category(null, ''))) {
+		dialogInsertCategory.value = false;
+		clearInsertCategoryInfo();
+		return;
+	}
 
-  if (!update_value.name || update_value.name === '') {
-    show_common_snackbar('修改分组失败: 名称 为空', 'error');
-    return;
-  }
-  await invoke('update_category', {category: update_value})
-      .then((res) => {
-        if (!!res && typeof res === 'boolean' && res) {
-          dialog_update_category.value = false;
-          show_common_snackbar('修改分组成功', 'success');
-          // 修改分组时,可能会变更分组和账号的关系,所以账号信息也要重新查询一遍
-          query_accounts_by_value(false);
-          // 更新分组信息
-          query_all_categories(false);
-          // 更新所有账号信息(用于分组信息更新时的选取)
-          query_all_accounts(false, false);
-          clear_update_category_info();
-        } else {
-          show_common_snackbar('修改分组失败: 未知原因', 'error');
-        }
-      })
-      .catch((err: unknown) => {
-        show_common_snackbar('修改分组失败: ' + JSON.stringify(err), 'error');
-      });
+	const quit = await showConfirm('分组还没有保存, 确认退出吗?', '添加分组');
+	if (!quit) {
+		return;
+	}
+	dialogInsertCategory.value = false;
+	clearInsertCategoryInfo();
 }
 
-async function toggle_liked() {
-  like_type.value = (like_type.value + 1) % 3;
-  liked.value = like_type.value === 1;
-  await query_accounts_by_value();
+async function onInsertCategorySave() {
+	const insertValue = { ...insertCategoryInfo.value };
+	if (!insertValue.name) {
+		showSnackbar('添加分组失败: 名称 为空', 'error');
+		return;
+	}
+
+	try {
+		const success = await createCategory(insertValue);
+		if (success) {
+			dialogInsertCategory.value = false;
+			showSnackbar('添加分组成功', 'success');
+			await loadAccountsByValue(false);
+			await loadAllCategories(false);
+			await loadAllAccounts(false, false);
+			clearInsertCategoryInfo();
+		} else {
+			showSnackbar('添加分组失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar('添加分组失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
-async function on_click_copy(text: string | number | null) {
-  if (!text) {
-    show_common_snackbar('复制失败: 没有内容诶,你在复制什么?', 'error');
-    return;
-  }
-  await writeText(text.toString());
-  show_common_snackbar('复制成功', 'success');
+async function onUpdateCategoryQuit() {
+	const quit = await showConfirm('分组信息还没有保存, 确认退出吗?', '修改分组');
+	if (!quit) {
+		return;
+	}
+	dialogUpdateCategory.value = false;
 }
 
-async function on_click_like(id: number | null, liked: boolean) {
-  const is_like = liked ? '取消标记' : '标记';
-  if (!id) {
-    show_common_snackbar(is_like + '失败: 需要指定id', 'error');
-    return;
-  }
-  await invoke('update_like', {id: id, liked: !liked})
-      .then((res) => {
-        // 在这里处理返回的 Account 类型数据
-        if (!!res && typeof res === 'boolean' && res) {
-          show_common_snackbar(is_like + '成功', 'success');
-          query_accounts_by_value(false);
-          query_all_accounts(false, false);
-        } else {
-          show_common_snackbar(is_like + '失败: 未知原因', 'error');
-        }
-      })
-      .catch((err: unknown) => {
-        show_common_snackbar(is_like + '失败: ' + JSON.stringify(err), 'error');
-      });
+async function onUpdateCategorySave() {
+	const updateValue = { ...selectedCategory.value };
+	if (!updateValue.name) {
+		showSnackbar('修改分组失败: 名称 为空', 'error');
+		return;
+	}
+
+	try {
+		const success = await updateCategory(updateValue);
+		if (success) {
+			dialogUpdateCategory.value = false;
+			showSnackbar('修改分组成功', 'success');
+			await loadAccountsByValue(false);
+			await loadAllCategories(false);
+			await loadAllAccounts(false, false);
+		} else {
+			showSnackbar('修改分组失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar('修改分组失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
-function toggle_update(account: Account) {
-  update_account_info.value = {...account};
-
-  dialog_update.value = true;
+async function toggleLiked() {
+	likeType.value = (likeType.value + 1) % 3;
+	await loadAccountsByValue();
 }
 
-async function on_update_quit() {
-  const isConfirmed = await show_common_confirm(
-      '账号信息还没有保存, 确认退出吗?',
-      '修改账号信息'
-  );
-
-  if (!isConfirmed) {
-    return;
-  }
-
-  dialog_update.value = false;
-  clear_update_account_info();
+async function onClickCopy(text: string) {
+	if (!text) {
+		showSnackbar('复制失败: 没有内容诶,你在复制什么?', 'error');
+		return;
+	}
+	await writeText(text);
+	showSnackbar('复制成功', 'success');
 }
 
-async function on_update_account_save() {
-  let update_value = {...update_account_info.value};
-  if (!update_value.id) {
-    show_common_snackbar('修改失败: id 为空', 'error');
-    return;
-  }
-  if (!update_value.name || update_value.name === '') {
-    show_common_snackbar('修改失败: name 为空', 'error');
-    return;
-  }
-  if (!update_value.username || update_value.username === '') {
-    show_common_snackbar('修改失败: username 为空', 'error');
-    return;
-  }
-  if (!update_value.password) {
-    show_common_snackbar('修改失败: password 为空', 'error');
-    return;
-  }
-  await invoke('update_account', {account: update_value})
-      .then((res) => {
-        // 在这里处理返回的 Account 类型数据
-        if (!!res && typeof res === 'boolean' && res) {
-          dialog_update.value = false;
-          show_common_snackbar('修改成功', 'success');
-          // 更新当前查询的账号信息
-          query_accounts_by_value(false);
-          query_all_categories(false);
-          query_all_accounts(false, false);
-          clear_update_account_info();
-        } else {
-          show_common_snackbar('修改失败: 未知原因', 'error');
-        }
-      })
-      .catch((err: unknown) => {
-        show_common_snackbar('修改失败: ' + JSON.stringify(err), 'error');
-      });
+async function onClickLike(id: number, isLiked: boolean) {
+	const action = isLiked ? '取消标记' : '标记';
+	try {
+		const success = await updateLike(id, !isLiked);
+		if (success) {
+			showSnackbar(action + '成功', 'success');
+			await loadAccountsByValue(false);
+			await loadAllAccounts(false, false);
+		} else {
+			showSnackbar(action + '失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar(action + '失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
-async function on_insert_account_quit() {
-  const quit = await show_common_confirm(
-      '账号信息还没有保存, 确认退出吗?',
-      '添加账号信息'
-  );
-
-  if (!quit) {
-    return;
-  }
-
-  dialog_insert.value = false;
-  clear_insert_account_info();
+function openUpdateDialog(account: Account) {
+	updateAccountInfo.value = cloneAccountForEdit(account);
+	updateAccountSnapshot.value = cloneAccountForEdit(account);
+	dialogUpdate.value = true;
 }
 
-async function on_insert_account_save() {
-  let account = {...insert_account_info.value};
-  if (!account.name || account.name === '') {
-    show_common_snackbar('添加账号信息失败: name 为空', 'error');
-    return;
-  }
-  if (!account.username || account.username === '') {
-    show_common_snackbar('添加账号信息失败: username 为空', 'error');
-    return;
-  }
-  if (!account.password) {
-    show_common_snackbar('添加账号信息失败: password 为空', 'error');
-    return;
-  }
-  await invoke('insert_account', {account: account})
-      .then((res) => {
-        // 在这里处理返回的 Account 类型数据
-        if (!!res && typeof res === 'boolean' && res) {
-          dialog_insert.value = false;
-          show_common_snackbar('添加账号信息成功', 'success');
-          // 添加账号信息时,可能会增加分组和账号的关系
-          // 所以当前查询的账号信息和所有分组信息都需要重新更新一遍
-          query_accounts_by_value(false);
-          query_all_categories(false);
-          // 更新所有账号信息(用于分组信息更新时的选取)
-          query_all_accounts(false, false);
-          clear_insert_account_info();
-        } else {
-          show_common_snackbar('添加账号信息失败: 未知原因', 'error');
-        }
-      })
-      .catch((err: unknown) => {
-        show_common_snackbar('添加账号信息失败: ' + JSON.stringify(err), 'error');
-      });
+async function onUpdateQuit() {
+	if (
+		updateAccountSnapshot.value &&
+		isAccountUnchanged(updateAccountInfo.value, updateAccountSnapshot.value)
+	) {
+		closeUpdateDialog();
+		return;
+	}
+
+	const confirmed = await showConfirm(
+		'账号信息还没有保存, 确认退出吗?',
+		'修改账号信息'
+	);
+	if (!confirmed) {
+		return;
+	}
+	closeUpdateDialog();
+}
+
+async function onUpdateAccountSave() {
+	const updateValue = { ...updateAccountInfo.value };
+	if (!updateValue.id) {
+		showSnackbar('修改失败: id 为空', 'error');
+		return;
+	}
+	if (
+		updateAccountSnapshot.value &&
+		isAccountUnchanged(updateValue, updateAccountSnapshot.value)
+	) {
+		closeUpdateDialog();
+		return;
+	}
+	if (!updateValue.name) {
+		showSnackbar('修改失败: name 为空', 'error');
+		return;
+	}
+	if (!updateValue.username) {
+		showSnackbar('修改失败: username 为空', 'error');
+		return;
+	}
+	if (!updateValue.password) {
+		showSnackbar('修改失败: password 为空', 'error');
+		return;
+	}
+
+	try {
+		const success = await updateAccount(updateValue);
+		if (success) {
+			closeUpdateDialog();
+			showSnackbar('修改成功', 'success');
+			await loadAccountsByValue(false);
+			await loadAllCategories(false);
+			await loadAllAccounts(false, false);
+		} else {
+			showSnackbar('修改失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar('修改失败: ' + JSON.stringify(err), 'error');
+	}
+}
+
+async function onInsertQuit() {
+	if (isAccountUnchanged(insertAccountInfo.value, new Account())) {
+		dialogInsert.value = false;
+		clearInsertAccountInfo();
+		return;
+	}
+
+	const quit = await showConfirm(
+		'账号信息还没有保存, 确认退出吗?',
+		'添加账号信息'
+	);
+	if (!quit) {
+		return;
+	}
+	dialogInsert.value = false;
+	clearInsertAccountInfo();
+}
+
+async function onInsertAccountSave() {
+	const account = { ...insertAccountInfo.value };
+	if (!account.name) {
+		showSnackbar('添加账号信息失败: name 为空', 'error');
+		return;
+	}
+	if (!account.username) {
+		showSnackbar('添加账号信息失败: username 为空', 'error');
+		return;
+	}
+	if (!account.password) {
+		showSnackbar('添加账号信息失败: password 为空', 'error');
+		return;
+	}
+
+	try {
+		const success = await insertAccount(account);
+		if (success) {
+			dialogInsert.value = false;
+			showSnackbar('添加账号信息成功', 'success');
+			await loadAccountsByValue(false);
+			await loadAllCategories(false);
+			await loadAllAccounts(false, false);
+			clearInsertAccountInfo();
+		} else {
+			showSnackbar('添加账号信息失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar('添加账号信息失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
 async function refresh() {
-  keyword.value = '';
-  like_type.value = 0;
-  liked.value = false;
-  selected_type.value = '全部';
-  selected_category.value = new Category(-1, '全部');
-  // 因为清空了所有选项,所以这里查全部就可以
-  await query_all_accounts();
-  await query_all_categories();
+	keyword.value = '';
+	likeType.value = 0;
+	selectedType.value = '全部';
+	selectedCategory.value = new Category(-1, '全部');
+	await refreshData();
 }
 
-async function query_all_accounts(
-    show_snackbar: boolean = true,
-    update_accounts: boolean = true
-) {
-  // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-  await invoke('query_all_accounts').then((res) => {
-    // 在这里处理返回的 Account[] 类型数据
-    if (!!res && res instanceof Array) {
-      available_accounts.value = res as Account[];
-      if (update_accounts) {
-        accounts.value = res as Account[];
-      }
+async function deleteOneAccount(id: number) {
+	const deleteConfirm = await showConfirm(
+		'这个操作不可回退, 确认删除此账号吗?',
+		'删除账号提示'
+	);
+	if (!deleteConfirm) {
+		return;
+	}
 
-      if (show_snackbar) {
-        show_common_snackbar('查询成功', 'success');
-      }
-    }
-  });
+	try {
+		const success = await deleteAccount(id);
+		if (success) {
+			showSnackbar('删除成功', 'success');
+			await loadAccountsByValue(false);
+			await loadAllAccounts(false, false);
+			await loadAllCategories(false);
+		} else {
+			showSnackbar('删除账号失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar('删除账号失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
-async function query_accounts_by_value(show_snackbar: boolean = true) {
-  let account = new Account();
-  account.name = '';
-  account.username = '';
-  account.password = '';
-  account.liked = liked.value;
-  if (selected_type.value === '全部') {
-    account.name = keyword.value;
-    account.username = keyword.value;
-  } else if (selected_type.value === '名称') {
-    account.name = keyword.value;
-  } else if (selected_type.value === '账号') {
-    account.username = keyword.value;
-  }
-  await invoke('query_accounts_by_value', {
-    account: account,
-    withLiked: like_type.value > 0,
-    // watch保证了这个值不为null
-    categoryId: selected_category.value.id
-  }).then((res) => {
-    // 在这里处理返回的 Account[] 类型数据
-    if (!!res && res instanceof Array) {
-      accounts.value = res as Account[];
+async function onDeleteCategory() {
+	const id = selectedCategory.value.id;
+	if (!id || id === -1) {
+		showSnackbar('删除分组失败: id 为空', 'error');
+		return;
+	}
 
-      if (show_snackbar) {
-        show_common_snackbar('查询成功', 'success');
-      }
-    }
-  });
+	const deleteConfirm = await showConfirm(
+		'这个操作不可回退, 确认删除此分组吗?',
+		'删除分组提示'
+	);
+	if (!deleteConfirm) {
+		return;
+	}
+
+	try {
+		const success = await deleteCategoryById(id);
+		if (success) {
+			showSnackbar('删除成功', 'success');
+			await loadAllCategories(false);
+			await loadAccountsByValue(false);
+			await loadAllAccounts(false, false);
+			selectedCategory.value = new Category(-1, '全部');
+		} else {
+			showSnackbar('删除分组失败: 未知原因', 'error');
+		}
+	} catch (err) {
+		showSnackbar('删除分组失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
-async function delete_one_account(id: number | null) {
-  if (!id) {
-    show_common_snackbar('删除账号失败: id 为空', 'error');
-    return;
-  }
-  const delete_confirm = await show_common_confirm(
-      '这个操作不可回退, 确认删除此账号吗?',
-      '删除账号提示'
-  );
+async function onReorderAccounts(ids: number[]) {
+	const previous = [...accounts.value];
+	accounts.value = accounts.value.map((item, index) => ({
+		...item,
+		sequence: index + 1
+	}));
 
-  if (!delete_confirm) {
-    return;
-  }
-
-  await invoke('delete_account', {id: id})
-      .then((res) => {
-        if (!!res && typeof res === 'boolean' && res) {
-          show_common_snackbar('删除成功', 'success');
-          // 更新当前查询的账号信息
-          query_accounts_by_value(false);
-          // 更新所有账号信息(用于分组信息更新时的选取)
-          query_all_accounts(false, false);
-          // 更新分组信息
-          query_all_categories(false);
-        } else {
-          show_common_snackbar('删除账号失败: 未知原因', 'error');
-        }
-      })
-      .catch((err) => {
-        show_common_snackbar('删除账号失败: ' + JSON.stringify(err), 'error');
-      });
+	try {
+		const success = await reorderAccounts(ids);
+		if (success) {
+			showSnackbar('排序已保存', 'success');
+			await loadAllAccounts(false, false);
+		} else {
+			accounts.value = previous;
+			showSnackbar('排序保存失败', 'error');
+		}
+	} catch (err) {
+		accounts.value = previous;
+		showSnackbar('排序保存失败: ' + JSON.stringify(err), 'error');
+	}
 }
 
-async function query_all_categories(show_snackbar: boolean = true) {
-  await invoke('query_all_category').then((res) => {
-    // 在这里处理返回的 Account[] 类型数据
-    if (!!res && res instanceof Array) {
-      categories.value = [new Category(-1, '全部'), ...(res as Category[])];
-      available_categories.value = res as Category[];
-
-      if (show_snackbar) {
-        show_common_snackbar('查询成功', 'success');
-      }
-    }
-  });
+function onHideUsernameClick() {
+	hideUsername.value = !hideUsername.value;
+	showSnackbar(
+		hideUsername.value ? '关闭展示完整用户名' : '开启展示完整用户名',
+		hideUsername.value ? 'warning' : 'success'
+	);
 }
 
-async function on_delete_category() {
-  let id = selected_category.value.id;
-  if (!id || id === -1) {
-    show_common_snackbar('删除分组失败: id 为空', 'error');
-    return;
-  }
-  const delete_confirm = await show_common_confirm(
-      '这个操作不可回退, 确认删除此分组吗?',
-      '删除分组提示'
-  );
-  if (!delete_confirm) {
-    return;
-  }
-  await invoke('delete_category_by_id', {id: id})
-      .then((res) => {
-        if (!!res && typeof res === 'boolean' && res) {
-          show_common_snackbar('删除成功', 'success');
-          // 更新分组信息
-          query_all_categories(false);
-          // 更新当前查询的账号信息
-          query_accounts_by_value(false);
-          // 更新所有账号信息(用于分组信息更新时的选取)
-          query_all_accounts(false, false);
-          selected_category.value = new Category(-1, '全部');
-        } else {
-          show_common_snackbar('删除分组失败: 未知原因', 'error');
-        }
-      })
-      .catch((err) => {
-        show_common_snackbar('删除分组失败: ' + JSON.stringify(err), 'error');
-      });
+async function toggleAlwaysOnTop() {
+	alwaysOnTop.value = !alwaysOnTop.value;
+	await appWindow.setAlwaysOnTop(alwaysOnTop.value);
+	showSnackbar(
+		alwaysOnTop.value ? '窗口已置顶' : '窗口置顶已关闭',
+		alwaysOnTop.value ? 'success' : 'info'
+	);
 }
 
-function on_hide_username_click() {
-  hide_username.value = !hide_username.value;
-  if (hide_username.value) {
-    show_common_snackbar('关闭展示完整用户名', 'warning');
-  } else {
-    show_common_snackbar('开启展示完整用户名', 'success');
-  }
+function onHidePasswordClick() {
+	hidePassword.value = !hidePassword.value;
+	showSnackbar(
+		hidePassword.value ? '关闭展示明文密码' : '开启展示明文密码',
+		hidePassword.value ? 'warning' : 'success'
+	);
 }
 
-function on_hide_password_click() {
-  hide_password.value = !hide_password.value
-  if (hide_password.value) {
-    show_common_snackbar('关闭展示明文密码', 'warning');
-  } else {
-    show_common_snackbar('开启展示明文密码', 'success');
-  }
-}
-
-function encrypt_username(username: string) {
-  // 获取用户名长度
-  const length = username.length;
-
-  // 计算第一份和第三份的长度
-  const firstThirdLength = Math.round(length * 0.2);
-
-  // 截取第一份
-  const firstPart = username.substring(0, firstThirdLength);
-
-  // 截取最后一份
-  const lastPart = username.substring(length - firstThirdLength);
-
-  // 计算中间部分的长度
-  const middlePartLength = length - 2 * firstThirdLength;
-
-  // 生成*号替代的中间部分
-  const middlePart = '*'.repeat(middlePartLength);
-
-  // 拼接加密后的用户名
-  return firstPart + middlePart + lastPart;
-}
-
-function encrypt_password(password: string) {
-  return '*'.repeat(password.length)
-}
-
-onMounted(() => {
-  query_all_accounts(false);
-  query_all_categories(false);
+onMounted(async () => {
+	await loadAllAccounts(false, true);
+	await loadAllCategories(false);
 });
-
-// This starter template is using Vue 3 <script setup> SFCs
-// Check out https://vuejs.org/api/sfc-script-setup.html#script-setup
 </script>
 
 <template>
-  <div class='container'>
-    <!-- #search info area -->
-    <v-container>
-      <!-- #normal search info -->
-      <v-row>
-        <v-col cols='4'>
-          <v-select
-              v-model='selected_type'
-              :items='types'
-              label='搜索类型'
-              variant='solo-filled'
-              hide-details
-              density='compact'>
-          </v-select>
-        </v-col>
+	<div class="page-layout">
+		<div class="account-page">
+			<div class="search-bar">
+				<AccountSearchBar
+					:types="types"
+					v-model:selected-type="selectedType"
+					v-model:keyword="keyword"
+					@search="loadAccountsByValue(true)"
+				/>
+			</div>
 
-        <v-col cols='7'>
-          <v-text-field
-              label='输入关键词'
-              variant='solo-filled'
-              v-model='keyword'
-              hide-details
-              density='compact'>
-            <template #append-inner>
-              <v-btn icon size='small' @click='query_accounts_by_value'>
-                <v-icon icon='mdi-magnify'></v-icon>
-              </v-btn>
-            </template>
-          </v-text-field>
-        </v-col>
+			<CategoryAccountPanel
+				class="category-panel"
+				v-model="accounts"
+				:categories="categories"
+				v-model:selected-category="selectedCategory"
+				:hide-username="hideUsername"
+				:hide-password="hidePassword"
+				:draggable-enabled="draggableEnabled"
+				@update:selected-category="onCategoryChange"
+				@insert-category="dialogInsertCategory = true"
+				@update-category="dialogUpdateCategory = true"
+				@delete-category="onDeleteCategory"
+				@reorder="onReorderAccounts"
+				@edit="openUpdateDialog"
+				@like="onClickLike"
+				@delete="deleteOneAccount"
+				@copy="onClickCopy"
+			/>
 
-        <v-col cols='1' class='col-align-center'>
-          <v-btn
-              :icon="show_category_select ? 'mdi-chevron-up' : 'mdi-chevron-down'"
-              size='x-small'
-              @click='toggle_show_category_select'>
-          </v-btn>
-        </v-col>
-      </v-row>
-      <!-- #category search info -->
-      <v-expand-transition>
-        <v-row v-show='show_category_select'>
-          <v-col cols='8'>
-            <v-select
-                v-model='selected_category'
-                :items='categories'
-                item-title='name'
-                item-value='id'
-                return-object
-                label='账号分组'
-                variant='solo-filled'
-                hide-details
-                :menu-props='{ maxHeight: 250 }'
-                @update:model-value='query_accounts_by_value(true)'
-                density='compact'>
-            </v-select>
-          </v-col>
-          <v-col cols='4'>
-            <!-- #category btn group -->
-            <v-btn-group variant='outlined' divided>
-              <v-btn
-                  variant='tonal'
-                  @click='dialog_insert_category = true'
-                  size='small'
-                  icon>
-                <v-icon icon='mdi-account-multiple-plus'></v-icon>
-              </v-btn>
-              <v-btn
-                  variant='tonal'
-                  @click='dialog_update_category = true'
-                  :disabled='
-									selected_category.id === null || selected_category.id === -1
-								'
-                  size='small'
-                  icon>
-                <v-icon icon='mdi-account-multiple'></v-icon>
-              </v-btn>
-              <v-btn
-                  icon
-                  @click='on_delete_category'
-                  size='small'
-                  variant='tonal'
-                  :disabled='
-									selected_category.id === null || selected_category.id === -1
-								'>
-                <v-icon icon='mdi-account-multiple-remove'></v-icon>
-              </v-btn>
-            </v-btn-group>
-          </v-col>
-        </v-row>
-      </v-expand-transition>
-    </v-container>
+			<AccountFormDialog
+			v-model="dialogInsert"
+			v-model:account="insertAccountInfo"
+			mode="insert"
+			:categories="availableCategories"
+			:sequences="sequences"
+			:likes="likes"
+			@quit="onInsertQuit"
+			@save="onInsertAccountSave"
+		/>
 
-    <v-divider></v-divider>
+		<AccountFormDialog
+			v-model="dialogUpdate"
+			v-model:account="updateAccountInfo"
+			mode="update"
+			:categories="availableCategories"
+			:sequences="sequences"
+			:likes="likes"
+			@quit="onUpdateQuit"
+			@save="onUpdateAccountSave"
+		/>
 
-    <!-- #account info area -->
-    <v-container class='scroll-container'>
-      <v-row dense>
-        <template v-for='(item, index) in accounts' :key='index'>
-          <v-col cols='6'>
-            <v-hover v-slot='{ isHovering, props }'>
-              <v-card
-                  v-bind='props'
-                  density='compact'
-                  @click='item.show = !item.show'>
-                <div v-if='isHovering'>
-                  <v-sheet class='edit-button' @click.stop>
-                    <v-btn
-                        :icon="item.liked ? 'mdi-heart' : 'mdi-heart-outline'"
-                        size='x-small'
-                        variant='tonal'
-                        @click='on_click_like(item.id, item.liked)'>
-                    </v-btn>
-                  </v-sheet>
-                  <v-sheet class='close-button' @click.stop>
-                    <v-btn
-                        icon='mdi-delete'
-                        size='x-small'
-                        variant='tonal'
-                        @click='delete_one_account(item.id)'>
-                    </v-btn>
-                  </v-sheet>
-                </div>
-                <v-card-title>
-                  <v-chip
-                      class='ma-2'
-                      variant='outlined'
-                      @click.stop
-                      @click='toggle_update(item)'>
-                    {{ item.name }}
-                  </v-chip>
-                </v-card-title>
+		<CategoryFormDialog
+			v-model="dialogInsertCategory"
+			v-model:category="insertCategoryInfo"
+			mode="insert"
+			:accounts="availableAccounts"
+			:sequences="sequences"
+			@quit="onInsertCategoryQuit"
+			@save="onInsertCategorySave"
+		/>
 
-                <v-card-subtitle> 优先级: {{ item.sequence }}</v-card-subtitle>
+		<CategoryFormDialog
+			v-model="dialogUpdateCategory"
+			v-model:category="selectedCategory"
+			mode="update"
+			:accounts="availableAccounts"
+			:sequences="sequences"
+			@quit="onUpdateCategoryQuit"
+			@save="onUpdateCategorySave"
+		/>
+		</div>
 
-                <v-card-text>
-                  <v-row dense>
-                    <!-- username start-->
-                    <v-col cols='12' v-if="hide_username">
-                      <v-btn
-                          variant='tonal'
-                          @click.stop
-                          @click='on_click_copy(item.username)'
-                          width='100%'
-                          class='text-none'>
-                        {{ encrypt_username(item.username) }}
-                      </v-btn>
-                    </v-col>
-                    <v-col cols='12' v-if="!hide_username">
-                      <v-btn
-                          variant='tonal'
-                          @click.stop
-                          @click='on_click_copy(item.username)'
-                          width='100%'
-                          class='text-none'>
-                        {{ item.username }}
-                      </v-btn>
-                    </v-col>
-                    <!-- username end-->
-
-                    <!-- password start-->
-                    <v-col cols='12' v-if="hide_password">
-                      <v-btn
-                          variant='tonal'
-                          @click.stop
-                          @click='on_click_copy(item.password)'
-                          width='100%'
-                          class='text-none'>
-                        {{ encrypt_password(item.password) }}
-                      </v-btn>
-                    </v-col>
-                    <v-col cols='12' v-if="!hide_password">
-                      <v-btn
-                          variant='tonal'
-                          @click.stop
-                          @click='on_click_copy(item.password)'
-                          width='100%'
-                          class='text-none'>
-                        {{ item.password }}
-                      </v-btn>
-                    </v-col>
-                    <!-- password end-->
-                  </v-row>
-                </v-card-text>
-                <v-expand-transition>
-                  <div v-show='item.show'>
-                    <v-divider></v-divider>
-                    <v-card-text>
-                      {{ item.description }}
-                    </v-card-text>
-                  </div>
-                </v-expand-transition>
-              </v-card>
-            </v-hover>
-          </v-col>
-        </template>
-      </v-row>
-    </v-container>
-
-    <!-- #update account dialog -->
-    <v-dialog v-model='dialog_update' persistent>
-      <v-card class='mx-12 dialog-card' density='compact'>
-        <v-card-title>修改账号信息</v-card-title>
-        <v-card-text style='padding: 0 24px'>
-          <v-container style='padding: 0'>
-            <v-text-field
-                v-model='update_account_info.name'
-                label='名称*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-text-field
-                v-model='update_account_info.username'
-                label='账号*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-text-field
-                v-model='update_account_info.password'
-                label='密码*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-text-field
-                v-model='update_account_info.description'
-                label='描述'
-                variant='solo-filled'
-                density='compact'
-                clearable>
-            </v-text-field>
-
-            <v-select
-                v-model='update_account_info.liked'
-                label="标记账号为'喜欢'"
-                :items='likes'
-                item-title='title'
-                item-value='value'
-                density='compact'
-                variant='solo-filled'>
-            </v-select>
-
-            <v-select
-                v-model='update_account_info.sequence'
-                label='选择账号优先级(用于排序,暂未实现)'
-                :items='sequences'
-                density='compact'
-                variant='solo-filled'>
-            </v-select>
-
-            <v-autocomplete
-                v-model='update_account_info.account_category_ids'
-                label='选择所属分组(可多选)'
-                :items='available_categories'
-                item-title='name'
-                item-value='id'
-                multiple
-                chips
-                closable-chips
-                :menu-props='{ maxHeight: 250 }'
-                density='compact'
-                class='ac-input-no-padding'
-                variant='solo-filled'>
-              <template v-slot:item='{ props, item }'>
-                <v-list-item
-                    v-bind='props'
-                    prepend-icon='mdi-account-group'
-                    :title='item.raw.name'></v-list-item>
-              </template>
-            </v-autocomplete>
-          </v-container>
-        </v-card-text>
-
-        <v-divider style='margin-top: 10px'></v-divider>
-
-        <v-card-actions style='padding: 0 24px'>
-          <v-spacer></v-spacer>
-          <v-btn color='error' variant='text' @click='on_update_quit'>
-            关闭
-          </v-btn>
-          <v-btn color='success' variant='text' @click='on_update_account_save'>
-            保存
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- #insert account dialog -->
-    <v-dialog v-model='dialog_insert' persistent>
-      <v-card class='mx-12 dialog-card' density='compact'>
-        <v-card-title>添加账号信息</v-card-title>
-        <v-card-text style='padding: 0 24px'>
-          <v-container style='padding: 0'>
-            <v-text-field
-                v-model='insert_account_info.name'
-                label='名称*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-text-field
-                v-model='insert_account_info.username'
-                label='账号*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-text-field
-                v-model='insert_account_info.password'
-                label='密码*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-text-field
-                v-model='insert_account_info.description'
-                label='描述'
-                variant='solo-filled'
-                density='compact'
-                clearable>
-            </v-text-field>
-
-            <v-select
-                v-model='insert_account_info.liked'
-                label="标记账号为'喜欢'"
-                :items='likes'
-                item-title='title'
-                item-value='value'
-                density='compact'
-                variant='solo-filled'>
-            </v-select>
-
-            <v-select
-                v-model='insert_account_info.sequence'
-                label='选择账号优先级(用于排序,暂未实现)'
-                :items='sequences'
-                density='compact'
-                variant='solo-filled'>
-            </v-select>
-
-            <v-autocomplete
-                v-model='insert_account_info.account_category_ids'
-                label='选择所属分组(可多选)'
-                :items='available_categories'
-                item-title='name'
-                item-value='id'
-                multiple
-                chips
-                closable-chips
-                :menu-props='{ maxHeight: 250 }'
-                density='compact'
-                class='ac-input-no-padding'
-                variant='solo-filled'>
-              <template v-slot:item='{ props, item }'>
-                <v-list-item
-                    v-bind='props'
-                    prepend-icon='mdi-account-group'
-                    :title='item.raw.name'></v-list-item>
-              </template>
-            </v-autocomplete>
-          </v-container>
-        </v-card-text>
-
-        <v-divider style='margin-top: 10px'></v-divider>
-
-        <v-card-actions style='padding: 0 24px'>
-          <v-spacer></v-spacer>
-          <v-btn color='error' variant='text' @click='on_insert_account_quit'>
-            关闭
-          </v-btn>
-          <v-btn color='success' variant='text' @click='on_insert_account_save'>
-            保存
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- #insert category dialog -->
-    <v-dialog v-model='dialog_insert_category' persistent>
-      <v-card class='mx-12 dialog-card' density='compact'>
-        <v-card-title>添加分组</v-card-title>
-        <v-card-text style='padding: 0 24px'>
-          <v-container style='padding: 0'>
-            <v-text-field
-                v-model='insert_category_info.name'
-                label='名称*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-select
-                v-model='insert_category_info.sequence'
-                label='选择分组优先级(用于排序,暂未实现)'
-                :items='sequences'
-                :menu-props='{ maxHeight: 250 }'
-                density='compact'
-                variant='solo-filled'>
-            </v-select>
-
-            <v-autocomplete
-                v-model='insert_category_info.account_ids'
-                label='关联的账号'
-                :items='available_accounts'
-                item-title='username'
-                item-value='id'
-                multiple
-                chips
-                closable-chips
-                :menu-props='{ maxHeight: 250 }'
-                density='compact'
-                class='ac-input-no-padding'
-                variant='solo-filled'>
-              <template v-slot:item='{ props, item }'>
-                <v-list-item
-                    v-bind='props'
-                    prepend-icon='mdi-account'
-                    :title='item.raw.username'
-                    :subtitle='item.raw.name'></v-list-item>
-              </template>
-            </v-autocomplete>
-          </v-container>
-        </v-card-text>
-
-        <v-divider style='margin-top: 10px'></v-divider>
-
-        <v-card-actions style='padding: 0 24px'>
-          <v-spacer></v-spacer>
-          <v-btn color='error' variant='text' @click='on_insert_category_quit'>
-            关闭
-          </v-btn>
-          <v-btn
-              color='success'
-              variant='text'
-              @click='on_insert_category_save'>
-            保存
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- #update category dialog -->
-    <v-dialog v-model='dialog_update_category' persistent>
-      <v-card class='mx-12 dialog-card' density='compact'>
-        <v-card-title>修改分组</v-card-title>
-        <v-card-text style='padding: 0 24px'>
-          <v-container style='padding: 0'>
-            <v-text-field
-                style='padding: 0'
-                v-model='selected_category.name'
-                label='名称*'
-                variant='solo-filled'
-                clearable
-                density='compact'
-                :rules='[rules.required]'>
-            </v-text-field>
-
-            <v-select
-                v-model='selected_category.sequence'
-                label='选择分组优先级(用于排序,暂未实现)'
-                :items='sequences'
-                :menu-props='{ maxHeight: 250 }'
-                density='compact'
-                variant='solo-filled'>
-            </v-select>
-
-            <v-autocomplete
-                v-model='selected_category.account_ids'
-                label='关联的账号'
-                :items='available_accounts'
-                item-title='username'
-                item-value='id'
-                multiple
-                chips
-                closable-chips
-                :menu-props='{ maxHeight: 250 }'
-                density='compact'
-                class='ac-input-no-padding'
-                variant='solo-filled'>
-              <template v-slot:item='{ props, item }'>
-                <v-list-item
-                    v-bind='props'
-                    prepend-icon='mdi-account'
-                    :title='item.raw.username'
-                    :subtitle='item.raw.name'></v-list-item>
-              </template>
-            </v-autocomplete>
-          </v-container>
-        </v-card-text>
-
-        <v-divider style='margin-top: 10px'></v-divider>
-
-        <v-card-actions style='padding: 0 24px'>
-          <v-spacer></v-spacer>
-          <v-btn color='error' variant='text' @click='on_update_category_quit'>
-            关闭
-          </v-btn>
-          <v-btn
-              color='success'
-              variant='text'
-              @click='on_update_category_save'>
-            保存
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-  </div>
-
-  <!-- foot-bar -->
-  <v-toolbar density='comfortable'>
-    <template v-slot:prepend>
-      <!-- #insert account btn-->
-      <v-btn size='small' icon @click='dialog_insert = true'>
-        <v-icon icon='mdi-account-plus'></v-icon>
-      </v-btn>
-      <!-- #show/hide username info-->
-      <v-btn size='small' icon @click='on_hide_username_click()' style="margin-left: 5px">
-        <v-icon v-if="hide_username" icon='mdi-account-off'></v-icon>
-        <v-icon v-if="!hide_username" icon='mdi-account'></v-icon>
-      </v-btn>
-      <!-- #show/hide password info-->
-      <v-btn size='small' icon @click='on_hide_password_click()' style="margin-left: 5px">
-        <v-icon v-if="hide_password" icon='mdi-lock-off'></v-icon>
-        <v-icon v-if="!hide_password" icon='mdi-lock'></v-icon>
-      </v-btn>
-    </template>
-    <v-btn
-        :icon="
-				like_type === 0
-					? 'mdi-heart-off'
-					: like_type === 1
-					? 'mdi-heart'
-					: 'mdi-heart-outline'
-			"
-        class='ms-5'
-        size='small'
-        @click='toggle_liked'></v-btn>
-    <v-divider
-        class='mx-3 align-self-center'
-        length='24'
-        thickness='2'
-        vertical></v-divider>
-    <v-btn icon='mdi-reload' @click='refresh' size='small'></v-btn>
-  </v-toolbar>
+		<div class="footer-row">
+			<AppFunctionPanel
+				:hide-username="hideUsername"
+				:hide-password="hidePassword"
+				@toggle-username="onHideUsernameClick"
+				@toggle-password="onHidePasswordClick"
+			/>
+			<AppFooterToolbar
+				class="footer-toolbar"
+				:like-type="likeType"
+				:always-on-top="alwaysOnTop"
+				@insert-account="dialogInsert = true"
+				@toggle-liked="toggleLiked"
+				@toggle-always-on-top="toggleAlwaysOnTop"
+				@refresh="refresh"
+			/>
+		</div>
+	</div>
 </template>
 
 <style scoped>
-.container {
-  display: flex;
-  flex-direction: column;
-  /* footbar 高55px */
-  height: calc(100vh - 55px);
-  padding-top: 0;
+.page-layout {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
 }
 
-.scroll-container {
-  flex: 1;
-  overflow-y: auto;
+.account-page {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: hidden;
+	width: 100%;
+	text-align: left;
 }
 
-.col-align-center {
-  align-self: center;
-  padding: 0;
-  margin: 0;
+.search-bar {
+	flex: 0 0 auto;
 }
 
-.close-button {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 1;
-  cursor: pointer;
-  border-radius: 50%;
+.category-panel {
+	flex: 1 1 auto;
+	min-height: 0;
+	margin: 0 13px 13px;
 }
 
-.edit-button {
-  position: absolute;
-  z-index: 1;
-  cursor: pointer;
-  border-radius: 50%;
+.footer-row {
+	display: flex;
+	align-items: stretch;
+	flex-shrink: 0;
+	width: 100%;
+	background: rgb(var(--v-theme-surface));
 }
 
-/* 自动补全框中的输入文本去掉padding,强制固定成一样的高度;而且关闭阴影 */
-.ac-input-no-padding >>> input {
-  padding: 0 !important;
-  box-shadow: none !important;
+.footer-toolbar {
+	flex: 1;
+	min-width: 0;
+}
+
+.footer-toolbar :deep(.v-toolbar) {
+	background: transparent;
 }
 </style>
