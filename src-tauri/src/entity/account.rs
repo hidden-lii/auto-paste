@@ -1,3 +1,4 @@
+use super::role::Role;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,4 +13,5 @@ pub(crate) struct Account {
     pub(crate) last_update_time: Option<String>,
     // 外部字段
     pub(crate) account_category_ids: Option<Vec<i32>>,
+    pub(crate) roles: Option<Vec<Role>>,
 }

@@ -35,3 +35,23 @@ export async function getAppVersion(): Promise<string> {
 export async function getCurrentAppVersion(): Promise<string> {
 	return await invoke<string>('get_current_app_version');
 }
+
+export async function getExportFields(): Promise<string[]> {
+	const result = await invoke<string[]>('get_export_fields');
+	return Array.isArray(result) && result.length > 0 ? result : [];
+}
+
+export async function saveExportFields(fields: string[]): Promise<boolean> {
+	const result = await invoke<boolean>('save_export_fields', { fields });
+	return !!result;
+}
+
+export async function getFavoriteFilter(): Promise<number> {
+	const result = await invoke<number>('get_favorite_filter');
+	return typeof result === 'number' ? result : 0;
+}
+
+export async function saveFavoriteFilter(value: number): Promise<boolean> {
+	const result = await invoke<boolean>('save_favorite_filter', { value });
+	return !!result;
+}

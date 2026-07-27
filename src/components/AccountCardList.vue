@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import draggable from 'vuedraggable';
 import AccountCard from './AccountCard.vue';
 import { Account } from '../entity/account';
+import { Jx3Server } from '../entity/jx3Server';
 
 const accounts = defineModel<Account[]>({ required: true });
 
@@ -10,6 +11,7 @@ defineProps<{
 	hideUsername: boolean;
 	hidePassword: boolean;
 	draggableEnabled: boolean;
+	servers: Jx3Server[];
 }>();
 
 const emit = defineEmits<{
@@ -17,6 +19,7 @@ const emit = defineEmits<{
 	edit: [account: Account];
 	like: [id: number, liked: boolean];
 	delete: [id: number];
+	share: [account: Account];
 	copy: [text: string];
 }>();
 
@@ -71,9 +74,11 @@ function onDragEnd() {
 							:hide-username="hideUsername"
 							:hide-password="hidePassword"
 							:draggable="draggableEnabled"
+							:servers="servers"
 							@edit="emit('edit', $event)"
 							@like="(id, liked) => emit('like', id, liked)"
 							@delete="(id) => emit('delete', id)"
+							@share="emit('share', $event)"
 							@copy="emit('copy', $event)"
 						/>
 					</div>

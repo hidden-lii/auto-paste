@@ -1,20 +1,40 @@
 <script setup lang="ts">
 import { encryptPassword, encryptUsername } from '../utils/mask';
 import { Account } from '../entity/account';
+import { Jx3Server } from '../entity/jx3Server';
 
 defineProps<{
 	account: Account;
 	hideUsername: boolean;
 	hidePassword: boolean;
 	draggable: boolean;
+	servers: Jx3Server[];
 }>();
 
 const emit = defineEmits<{
 	edit: [account: Account];
 	like: [id: number, liked: boolean];
 	delete: [id: number];
+	share: [account: Account];
 	copy: [text: string];
 }>();
+
+function serverMeta(serverName: string, servers: Jx3Server[]) {
+	return servers.find((item) => item.server === serverName);
+}
+
+function statusColor(status: string) {
+	switch (status) {
+		case '正常':
+			return 'success';
+		case '拥挤':
+			return 'warning';
+		case '爆满':
+			return 'error';
+		default:
+			return 'default';
+	}
+}
 </script>
 
 <template>
@@ -33,20 +53,40 @@ const emit = defineEmits<{
 				variant="tonal"
 				@click.stop="account.id && emit('like', account.id, account.liked)"
 			/>
-			<v-btn
-				class="no-drag"
-				icon="mdi-delete"
-				size="x-small"
-				variant="tonal"
-				@click.stop="account.id && emit('delete', account.id)"
-			/>
+			<v-menu location="bottom end">
+				<template #activator="{ props: menuProps }">
+					<v-btn
+						v-bind="menuProps"
+						class="no-drag"
+						icon="mdi-dots-horizontal"
+						size="x-small"
+						variant="tonal"
+						@click.stop
+					/>
+				</template>
+				<v-list density="compact" nav>
+					<v-list-item
+						title="修改"
+						prepend-icon="mdi-pencil"
+						@click="emit('edit', account)"
+					/>
+					<v-list-item
+						title="分享"
+						prepend-icon="mdi-share-variant"
+						@click="emit('share', account)"
+					/>
+					<v-list-item
+						title="删除"
+						prepend-icon="mdi-delete"
+						base-color="error"
+						@click="account.id && emit('delete', account.id)"
+					/>
+				</v-list>
+			</v-menu>
 		</div>
 
 		<v-card-title class="account-card-title">
-			<span
-				class="account-card-name no-drag"
-				@click.stop="emit('edit', account)"
-			>
+			<span class="account-card-name">
 				{{ account.name }}
 			</span>
 		</v-card-title>
@@ -98,7 +138,50 @@ const emit = defineEmits<{
 		<v-expand-transition>
 			<div v-show="account.show">
 				<v-divider />
-				<v-card-text>{{ account.description }}</v-card-text>
+				<v-card-text>
+					<div v-if="account.roles?.length" class="role-list">
+						<div
+							v-for="(role, index) in account.roles"
+							:key="`${role.role_id}-${role.server}-${index}`"
+							class="role-item no-drag"
+							@click.stop
+							@click="
+								emit(
+									'copy',
+									`${role.role_id} @ ${role.server}`
+								)
+							"
+						>
+							<span>{{ role.role_id }}</span>
+							<span class="role-separator">·</span>
+							<span>
+								{{
+									serverMeta(role.server, servers)
+										? `${serverMeta(role.server, servers)!.zone}·${role.server}`
+										: role.server
+								}}
+							</span>
+							<v-chip
+								v-if="serverMeta(role.server, servers)"
+								size="x-small"
+								class="ms-1"
+								:color="
+									statusColor(
+										serverMeta(role.server, servers)!.status
+									)
+								"
+							>
+								{{ serverMeta(role.server, servers)!.status }}
+							</v-chip>
+						</div>
+					</div>
+					<div v-else class="text-caption text-medium-emphasis">
+						暂无角色
+					</div>
+					<div v-if="account.description" class="account-description">
+						{{ account.description }}
+					</div>
+				</v-card-text>
 			</div>
 		</v-expand-transition>
 	</v-card>
@@ -174,16 +257,7 @@ const emit = defineEmits<{
 	font-size: 0.95rem;
 	font-weight: 500;
 	word-break: break-all;
-	cursor: pointer;
 	user-select: none;
-	transition:
-		border-color 0.15s ease,
-		background-color 0.15s ease;
-}
-
-.account-card-name:hover {
-	border-color: rgba(var(--v-theme-primary), 0.6);
-	background: rgba(var(--v-theme-primary), 0.08);
 }
 
 .account-card-subtitle {
@@ -198,5 +272,38 @@ const emit = defineEmits<{
 
 .account-card-priority {
 	line-height: 1.2;
+}
+
+.role-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.role-item {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 6px 8px;
+	border-radius: 6px;
+	background: rgba(255, 255, 255, 0.06);
+	cursor: pointer;
+	font-size: 0.85rem;
+}
+
+.role-item:hover {
+	background: rgba(255, 255, 255, 0.1);
+}
+
+.role-separator {
+	opacity: 0.5;
+}
+
+.account-description {
+	margin-top: 8px;
+	font-size: 0.85rem;
+	opacity: 0.85;
 }
 </style>

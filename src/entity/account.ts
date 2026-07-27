@@ -1,3 +1,5 @@
+import { Role } from './role';
+
 export { Account };
 
 class Account {
@@ -10,6 +12,7 @@ class Account {
 	public description: string | null = null;
 	public show: boolean = false;
 	public account_category_ids: number[] = [];
+	public roles: Role[] = [];
 
 	constructor() {}
 }

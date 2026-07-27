@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { writeText } from '@tauri-apps/api/clipboard';
 import { appWindow } from '@tauri-apps/api/window';
 import { Account } from '../entity/account';
@@ -26,7 +26,27 @@ import AccountFormDialog from '../components/AccountFormDialog.vue';
 import CategoryFormDialog from '../components/CategoryFormDialog.vue';
 import AppFooterToolbar from '../components/AppFooterToolbar.vue';
 import AppFunctionPanel from '../components/AppFunctionPanel.vue';
+import NetworkSyncDialog from '../components/NetworkSyncDialog.vue';
 import { loadDisplaySettings, persistDisplaySettings } from '../utils/display';
+import { Jx3Server } from '../entity/jx3Server';
+import { sortJx3Servers } from '../utils/jx3Server';
+import { Role } from '../entity/role';
+import {
+	getNetworkSyncSettings,
+	queryAllJx3Servers,
+	saveNetworkSyncSettings,
+	syncJx3Servers
+} from '../api/server';
+import {
+	getExportFields,
+	getFavoriteFilter,
+	saveFavoriteFilter
+} from '../api/setting';
+import {
+	ExportField,
+	formatAccountForShare,
+	getDefaultExportFields
+} from '../utils/export';
 
 const { showConfirm, showSnackbar } = useFeedback();
 
@@ -43,8 +63,8 @@ const dialogUpdate = ref(false);
 const dialogInsertCategory = ref(false);
 const dialogUpdateCategory = ref(false);
 const likes = [
-	{ value: true, title: '喜欢' },
-	{ value: false, title: '普通' }
+	{ value: true, title: '已收藏' },
+	{ value: false, title: '未收藏' }
 ];
 const keyword = ref('');
 const insertAccountInfo = ref<Account>(new Account());
@@ -56,6 +76,13 @@ const hidePassword = ref(true);
 const defaultHideUsername = ref(false);
 const defaultHidePassword = ref(true);
 const alwaysOnTop = ref(false);
+const jx3Servers = ref<Jx3Server[]>([]);
+const exportFields = ref<ExportField[]>(getDefaultExportFields());
+const networkSyncEnabled = ref(false);
+const networkSyncPrompted = ref(false);
+const networkSyncLastSync = ref<string | null>(null);
+const networkSyncDialogOpen = ref(false);
+const likeTypeReady = ref(false);
 
 const draggableEnabled = computed(
 	() =>
@@ -76,8 +103,22 @@ function clearUpdateAccountInfo() {
 function cloneAccountForEdit(account: Account): Account {
 	return {
 		...account,
-		account_category_ids: [...(account.account_category_ids ?? [])]
+		account_category_ids: [...(account.account_category_ids ?? [])],
+		roles: (account.roles ?? []).map(
+			(role) =>
+				new Role(role.role_id, role.server)
+		)
 	};
+}
+
+function isSameRoleList(left: Role[], right: Role[]): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+	return left.every((role, index) => {
+		const other = right[index];
+		return role.role_id === other.role_id && role.server === other.server;
+	});
 }
 
 function isSameIdList(left: number[], right: number[]): boolean {
@@ -100,7 +141,14 @@ function isAccountUnchanged(current: Account, snapshot: Account): boolean {
 		isSameIdList(
 			current.account_category_ids ?? [],
 			snapshot.account_category_ids ?? []
-		)
+		) &&
+		isSameRoleList(current.roles ?? [], snapshot.roles ?? [])
+	);
+}
+
+function sanitizeRoles(roles: Role[]): Role[] {
+	return roles.filter(
+		(role) => role.role_id.trim() !== '' && role.server.trim() !== ''
 	);
 }
 
@@ -253,10 +301,13 @@ async function onUpdateCategorySave() {
 	}
 }
 
-async function toggleLiked() {
-	likeType.value = (likeType.value + 1) % 3;
-	await loadAccountsByValue();
-}
+watch(likeType, async () => {
+	if (!likeTypeReady.value) {
+		return;
+	}
+	await saveFavoriteFilter(likeType.value);
+	await loadAccountsByValue(false);
+});
 
 async function onClickCopy(text: string) {
 	if (!text) {
@@ -268,7 +319,7 @@ async function onClickCopy(text: string) {
 }
 
 async function onClickLike(id: number, isLiked: boolean) {
-	const action = isLiked ? '取消标记' : '标记';
+	const action = isLiked ? '已取消收藏' : '已收藏';
 	try {
 		const success = await updateLike(id, !isLiked);
 		if (success) {
@@ -309,7 +360,10 @@ async function onUpdateQuit() {
 }
 
 async function onUpdateAccountSave() {
-	const updateValue = { ...updateAccountInfo.value };
+	const updateValue = {
+		...updateAccountInfo.value,
+		roles: sanitizeRoles(updateAccountInfo.value.roles ?? [])
+	};
 	if (!updateValue.id) {
 		showSnackbar('修改失败: id 为空', 'error');
 		return;
@@ -369,7 +423,10 @@ async function onInsertQuit() {
 }
 
 async function onInsertAccountSave() {
-	const account = { ...insertAccountInfo.value };
+	const account = {
+		...insertAccountInfo.value,
+		roles: sanitizeRoles(insertAccountInfo.value.roles ?? [])
+	};
 	if (!account.name) {
 		showSnackbar('添加账号信息失败: name 为空', 'error');
 		return;
@@ -397,6 +454,75 @@ async function onInsertAccountSave() {
 		}
 	} catch (err) {
 		showSnackbar('添加账号信息失败: ' + JSON.stringify(err), 'error');
+	}
+}
+
+async function onShareAccount(account: Account) {
+	await loadExportFieldSettings();
+	const text = formatAccountForShare(
+		account,
+		exportFields.value,
+		jx3Servers.value
+	);
+	if (!text) {
+		showSnackbar('分享失败: 没有可导出的内容', 'error');
+		return;
+	}
+	await writeText(text);
+	showSnackbar('已复制到剪贴板', 'success');
+}
+
+async function loadJx3Servers() {
+	const servers = await queryAllJx3Servers();
+	jx3Servers.value = sortJx3Servers(servers);
+}
+
+async function loadExportFieldSettings() {
+	const fields = await getExportFields();
+	exportFields.value =
+		fields.length > 0
+			? (fields as ExportField[])
+			: getDefaultExportFields();
+}
+
+async function loadNetworkSyncSettings() {
+	const settings = await getNetworkSyncSettings();
+	networkSyncEnabled.value = settings.enabled;
+	networkSyncPrompted.value = settings.prompted;
+	networkSyncLastSync.value = settings.lastSync;
+}
+
+async function runServerSync(forceFallback = false) {
+	await syncJx3Servers(forceFallback);
+	await loadJx3Servers();
+	const settings = await getNetworkSyncSettings();
+	networkSyncLastSync.value = settings.lastSync;
+}
+
+async function onNetworkSyncAllow() {
+	await saveNetworkSyncSettings(true, true);
+	networkSyncEnabled.value = true;
+	networkSyncPrompted.value = true;
+	await runServerSync(false);
+	showSnackbar('区服数据已更新', 'success');
+}
+
+async function onNetworkSyncDeny() {
+	await saveNetworkSyncSettings(false, true);
+	networkSyncEnabled.value = false;
+	networkSyncPrompted.value = true;
+	await runServerSync(true);
+}
+
+async function onNetworkSyncEnabledChange(value: boolean) {
+	await saveNetworkSyncSettings(value, true);
+	networkSyncEnabled.value = value;
+	networkSyncPrompted.value = true;
+	if (value) {
+		await runServerSync(false);
+		showSnackbar('区服数据已更新', 'success');
+	} else {
+		showSnackbar('已关闭联网同步', 'info');
 	}
 }
 
@@ -540,8 +666,22 @@ async function loadDisplayPreferences() {
 
 onMounted(async () => {
 	await loadDisplayPreferences();
+	await loadNetworkSyncSettings();
+	await loadExportFieldSettings();
+	likeType.value = await getFavoriteFilter();
+	likeTypeReady.value = true;
+
+	if (!networkSyncPrompted.value) {
+		networkSyncDialogOpen.value = true;
+	} else if (networkSyncEnabled.value) {
+		await runServerSync(false);
+	} else {
+		await runServerSync(true);
+	}
+
 	await loadAllAccounts(false, true);
 	await loadAllCategories(false);
+	await loadAccountsByValue(false);
 });
 </script>
 
@@ -565,6 +705,7 @@ onMounted(async () => {
 				:hide-username="hideUsername"
 				:hide-password="hidePassword"
 				:draggable-enabled="draggableEnabled"
+				:servers="jx3Servers"
 				@update:selected-category="onCategoryChange"
 				@insert-category="dialogInsertCategory = true"
 				@update-category="dialogUpdateCategory = true"
@@ -573,6 +714,7 @@ onMounted(async () => {
 				@edit="openUpdateDialog"
 				@like="onClickLike"
 				@delete="deleteOneAccount"
+				@share="onShareAccount"
 				@copy="onClickCopy"
 			/>
 
@@ -582,6 +724,7 @@ onMounted(async () => {
 			mode="insert"
 			:categories="availableCategories"
 			:likes="likes"
+			:servers="jx3Servers"
 			@quit="onInsertQuit"
 			@save="onInsertAccountSave"
 		/>
@@ -592,6 +735,7 @@ onMounted(async () => {
 			mode="update"
 			:categories="availableCategories"
 			:likes="likes"
+			:servers="jx3Servers"
 			@quit="onUpdateQuit"
 			@save="onUpdateAccountSave"
 		/>
@@ -613,6 +757,11 @@ onMounted(async () => {
 			@quit="onUpdateCategoryQuit"
 			@save="onUpdateCategorySave"
 		/>
+		<NetworkSyncDialog
+			v-model="networkSyncDialogOpen"
+			@allow="onNetworkSyncAllow"
+			@deny="onNetworkSyncDeny"
+		/>
 		</div>
 
 		<div class="footer-row">
@@ -621,17 +770,19 @@ onMounted(async () => {
 				:hide-password="hidePassword"
 				:default-hide-username="defaultHideUsername"
 				:default-hide-password="defaultHidePassword"
+				:network-sync-enabled="networkSyncEnabled"
+				:last-sync="networkSyncLastSync"
 				@toggle-username="onHideUsernameClick"
 				@toggle-password="onHidePasswordClick"
 				@update:default-hide-username="onDefaultHideUsernameChange"
 				@update:default-hide-password="onDefaultHidePasswordChange"
+				@update:network-sync-enabled="onNetworkSyncEnabledChange"
 			/>
 			<AppFooterToolbar
 				class="footer-toolbar"
-				:like-type="likeType"
+				v-model:like-type="likeType"
 				:always-on-top="alwaysOnTop"
 				@insert-account="dialogInsert = true"
-				@toggle-liked="toggleLiked"
 				@toggle-always-on-top="toggleAlwaysOnTop"
 				@refresh="refresh"
 			/>
@@ -668,6 +819,8 @@ onMounted(async () => {
 }
 
 .footer-row {
+	position: relative;
+	z-index: 1;
 	display: flex;
 	align-items: stretch;
 	flex-shrink: 0;

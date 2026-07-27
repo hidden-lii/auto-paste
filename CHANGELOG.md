@@ -4,6 +4,24 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [1.1.4] - 2026-07-27
+
+### 新增
+
+- 账号支持多角色区服（独立 `role` 表），区服从 JX3API 同步入库，表单内可搜索选择
+- 区服选择支持模糊搜索（区服名 / 大区 / 状态），列表按状态（爆满 → 拥挤 → 正常）及拼音首字母排序
+- 卡片右上角「更多」菜单：修改、删除、分享
+- 分享支持按导出设置复制格式化文本；导出设置独立 Dialog
+- 首次启动网络授权弹窗；功能面板可开关联网同步区服
+- 底部收藏筛选改为向上展开 radio 面板（全部 / 收藏 / 未收藏）
+
+### 变更
+
+- 收藏文案统一为「已收藏」/「未收藏」
+- 功能面板用户名/密码切换改为 radio 样式
+
+---
+
 ## [1.1.3] - 2026-07-22
 
 ### 新增
@@ -98,6 +116,7 @@
 - 界面汉化与操作提示对话框
 - MIT 开源许可证
 
+[1.1.4]: https://github.com/hidden-lii/auto-paste/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/hidden-lii/auto-paste/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/hidden-lii/auto-paste/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/hidden-lii/auto-paste/compare/v1.1.0...v1.1.1

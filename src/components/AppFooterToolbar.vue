@@ -1,33 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import FavoriteFilterPanel from './FavoriteFilterPanel.vue';
 
 const props = defineProps<{
-	likeType: number;
 	alwaysOnTop: boolean;
 }>();
 
-const likedTooltip = computed(() => {
-	switch (props.likeType) {
-		case 0:
-			return '仅显示收藏';
-		case 1:
-			return '仅显示未收藏';
-		case 2:
-			return '显示全部账号';
-		default:
-			return '切换收藏筛选';
-	}
-});
-const alwaysOnTopTooltip = computed(() =>
-	props.alwaysOnTop ? '取消置顶' : '窗口置顶'
-);
+const likeType = defineModel<number>('likeType', { required: true });
 
 const emit = defineEmits<{
 	'insert-account': [];
-	'toggle-liked': [];
 	'toggle-always-on-top': [];
 	refresh: [];
 }>();
+
+const alwaysOnTopTooltip = (alwaysOnTop: boolean) =>
+	alwaysOnTop ? '取消置顶' : '窗口置顶';
 </script>
 
 <template>
@@ -47,23 +34,7 @@ const emit = defineEmits<{
 			</v-tooltip>
 		</template>
 
-		<v-tooltip :text="likedTooltip" location="top">
-			<template #activator="{ props: tooltipProps }">
-				<v-btn
-					v-bind="tooltipProps"
-					:icon="
-						likeType === 0
-							? 'mdi-heart-off'
-							: likeType === 1
-								? 'mdi-heart'
-								: 'mdi-heart-outline'
-					"
-					class="ms-5"
-					size="small"
-					@click="emit('toggle-liked')"
-				/>
-			</template>
-		</v-tooltip>
+		<FavoriteFilterPanel v-model:like-type="likeType" />
 
 		<v-divider
 			class="mx-3 align-self-center"
@@ -72,7 +43,7 @@ const emit = defineEmits<{
 			vertical
 		/>
 
-		<v-tooltip :text="alwaysOnTopTooltip" location="top">
+		<v-tooltip :text="alwaysOnTopTooltip(props.alwaysOnTop)" location="top">
 			<template #activator="{ props: tooltipProps }">
 				<v-btn
 					v-bind="tooltipProps"
@@ -80,7 +51,7 @@ const emit = defineEmits<{
 					icon
 					@click="emit('toggle-always-on-top')"
 				>
-					<v-icon :icon="alwaysOnTop ? 'mdi-pin' : 'mdi-pin-off'" />
+					<v-icon :icon="props.alwaysOnTop ? 'mdi-pin' : 'mdi-pin-off'" />
 				</v-btn>
 			</template>
 		</v-tooltip>

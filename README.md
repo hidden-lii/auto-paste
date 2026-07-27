@@ -2,17 +2,26 @@
 
 一款基于 [Tauri](https://tauri.app/) 的桌面端账号管理工具，用于本地保存账号信息，并支持一键复制用户名或密码到剪贴板，方便日常登录与切换账号。
 
-当前版本：**1.1.3**
+当前版本：**1.1.4**
 
 ## 功能特性
 
 ### 账号管理
 
 - **增删改查**：添加、编辑、删除账号，支持名称、用户名、密码、备注、优先级等字段
+- **多角色区服**：每个账号可关联多个角色 ID 与区服，卡片上展示角色及区服在线状态
 - **一键复制**：点击账号卡片上的用户名或密码按钮，即可复制到系统剪贴板
-- **收藏标记**：为常用账号添加「喜欢」标记，并支持按收藏状态筛选
+- **分享账号**：卡片「更多」菜单支持按导出设置复制格式化文本
+- **收藏标记**：为常用账号添加收藏标记，并支持按收藏状态筛选
 - **拖拽排序**：在「全部」分组且无搜索/筛选条件下，可拖拽调整账号显示顺序
 - **敏感信息脱敏**：默认隐藏用户名中间段与密码明文，可在功能面板中切换显示，并支持持久化默认显示偏好
+
+### 区服数据
+
+- **联网同步**：首次启动可授权从 [JX3API](https://www.jx3api.com/) 拉取最新区服及在线状态并写入本地数据库
+- **离线兜底**：拒绝联网或同步失败时使用内置区服列表，不影响基本使用
+- **可搜索选择**：编辑账号时区服支持输入模糊搜索（区服名 / 大区 / 状态）
+- **智能排序**：区服列表按状态（爆满 → 拥挤 → 正常）排序，同状态内按拼音首字母排列
 
 ### 分组管理
 
@@ -23,7 +32,7 @@
 ### 搜索与筛选
 
 - **关键词搜索**：支持按「全部」「名称」「账号」三种维度模糊搜索
-- **收藏筛选**：循环切换「全部 / 仅收藏 / 仅未收藏」三种模式
+- **收藏筛选**：底部工具栏向上展开面板，切换「全部 / 已收藏 / 未收藏」
 - **分组筛选**：结合分组标签页过滤账号列表
 
 ### 窗口与界面
@@ -44,7 +53,7 @@
 | 数据库 | [SQLite](https://www.sqlite.org/)（通过 `rusqlite`） |
 | 后端语言 | [Rust](https://www.rust-lang.org/) |
 
-其他依赖：`vuedraggable`（拖拽排序）、`vuetify-use-dialog`（确认对话框与提示）、`@mdi/font`（图标）。
+其他依赖：`vuedraggable`（拖拽排序）、`vuetify-use-dialog`（确认对话框与提示）、`@mdi/font`（图标）、`reqwest`（区服数据同步）。
 
 ## 环境要求
 
@@ -108,27 +117,31 @@ npm run tauri build
 ```
 auto-paste/
 ├── src/                          # Vue 前端源码
-│   ├── api/                      # Tauri invoke 封装（account / category / window）
+│   ├── api/                      # Tauri invoke 封装（account / category / window / server）
 │   ├── components/               # UI 组件
-│   │   ├── AccountCard.vue       # 账号卡片
+│   │   ├── AccountCard.vue       # 账号卡片（含角色区服、更多菜单）
 │   │   ├── AccountCardList.vue   # 账号列表（含拖拽）
 │   │   ├── AccountFormDialog.vue # 账号新增/编辑对话框
 │   │   ├── AccountSearchBar.vue  # 搜索栏
 │   │   ├── AppFooterToolbar.vue  # 底部工具栏
-│   │   ├── AppFunctionPanel.vue  # 功能面板（脱敏、窗口大小）
+│   │   ├── AppFunctionPanel.vue  # 功能面板（脱敏、窗口大小、联网同步）
 │   │   ├── CategoryAccountPanel.vue
 │   │   ├── CategoryFormDialog.vue
 │   │   ├── CategoryTabBar.vue    # 分组标签页
+│   │   ├── ExportSettingsDialog.vue  # 导出字段设置
+│   │   ├── FavoriteFilterPanel.vue   # 收藏筛选面板
+│   │   ├── NetworkSyncDialog.vue     # 联网同步授权弹窗
 │   │   └── WindowSizeDialog.vue  # 窗口大小设置
 │   ├── composables/              # 组合式函数
 │   ├── entity/                   # 前端数据模型
 │   ├── pages/
 │   │   └── AccountPage.vue       # 主页面
-│   └── utils/                    # 工具函数（脱敏、窗口、反馈提示）
+│   └── utils/                    # 工具函数（脱敏、窗口、反馈、导出、区服排序）
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
 │   │   ├── main.rs               # Tauri 入口与 Command 定义
 │   │   ├── sqlite.rs             # SQLite 数据访问层
+│   │   ├── jx3_sync.rs           # JX3API 区服同步
 │   │   └── entity/               # Rust 数据模型
 │   ├── tauri.conf.json           # Tauri 配置
 │   └── tauri.macos.conf.json     # macOS 平台覆盖配置
@@ -146,9 +159,11 @@ auto-paste/
 | 表名 | 说明 |
 |------|------|
 | `account` | 账号信息（名称、用户名、密码、优先级、收藏状态、备注等） |
+| `role` | 账号关联的角色 ID 与区服 |
+| `jx3_server` | 区服列表及在线状态（联网同步或内置兜底） |
 | `category` | 分组信息 |
 | `account_category` | 账号与分组的多对多关联 |
-| `app_setting` | 应用设置（如窗口宽高） |
+| `app_setting` | 应用设置（窗口宽高、显示偏好、联网同步等） |
 
 > **注意**：账号密码以明文存储在本地数据库中，请仅在可信任的个人设备上使用，并注意备份与权限管理。
 
@@ -174,6 +189,10 @@ auto-paste/
 | `update_category` | 更新分组 |
 | `delete_category_by_id` | 删除分组 |
 | `reorder_categories` | 批量更新分组排序 |
+| `query_all_jx3_servers` | 查询全部区服 |
+| `sync_jx3_servers` | 同步区服数据（联网或兜底） |
+| `get_network_sync_settings` | 获取联网同步设置 |
+| `save_network_sync_settings` | 保存联网同步设置 |
 | `get_saved_window_size` | 获取已保存的窗口尺寸 |
 | `save_window_size` | 保存窗口尺寸 |
 | `get_default_window_size` | 获取默认窗口尺寸 |
@@ -185,6 +204,18 @@ auto-paste/
 1. 在账号卡片上点击**用户名**或**密码**按钮
 2. 内容会自动写入系统剪贴板，并弹出「复制成功」提示
 3. 切换到目标应用后粘贴即可
+
+### 管理角色区服
+
+1. 在新增/编辑账号对话框的「角色区服」区域点击「添加角色」
+2. 填写角色 ID，并在区服输入框中搜索选择区服（支持按区服名、大区、状态模糊匹配）
+3. 保存后卡片会展示各角色对应的区服及在线状态
+
+### 分享账号
+
+1. 点击账号卡片右上角「更多」菜单
+2. 选择「分享」，按导出设置复制格式化文本到剪贴板
+3. 可在功能面板中打开「导出设置」自定义导出字段
 
 ### 管理分组
 
@@ -205,7 +236,7 @@ auto-paste/
 | 按钮 | 功能 |
 |------|------|
 | 添加账号 | 打开新增账号对话框 |
-| 心形图标 | 循环切换收藏筛选（全部 → 仅收藏 → 仅未收藏） |
+| 心形图标 | 展开收藏筛选面板（全部 / 已收藏 / 未收藏） |
 | 图钉图标 | 切换窗口置顶 |
 | 刷新 | 重置搜索与筛选条件并重新加载数据 |
 
@@ -216,6 +247,8 @@ auto-paste/
 - 显示/隐藏完整用户名
 - 显示/隐藏明文密码
 - 设置默认隐藏用户名/密码（重启后仍生效）
+- 联网同步区服数据开关
+- 导出设置
 - 设置窗口大小（支持恢复默认）
 
 ## 平台支持

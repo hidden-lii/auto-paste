@@ -2,15 +2,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod sqlite;
+mod jx3_sync;
 
 mod entity {
     pub mod account;
     pub mod account_category;
     pub mod category;
+    pub mod jx3_server;
+    pub mod role;
 }
 
 use crate::entity::account::Account;
 use crate::entity::category::Category;
+use crate::entity::jx3_server::Jx3Server;
 use serde::{Deserialize, Serialize};
 use tauri::{LogicalSize, Manager, Size};
 // use tauri::{CustomMenuItem, Menu, MenuItem, Submenu};
@@ -220,6 +224,109 @@ fn get_current_app_version() -> String {
 }
 
 #[tauri::command]
+fn query_all_jx3_servers() -> Vec<Jx3Server> {
+    match sqlite::query_all_jx3_servers() {
+        Ok(servers) => servers,
+        Err(e) => {
+            println!("query_all_jx3_servers error: {:?}", e);
+            vec![]
+        }
+    }
+}
+
+#[tauri::command]
+fn sync_jx3_servers(force_fallback: bool) -> bool {
+    match sqlite::sync_jx3_servers(force_fallback) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("sync_jx3_servers error: {:?}", e);
+            false
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct NetworkSyncSettings {
+    enabled: bool,
+    prompted: bool,
+    last_sync: Option<String>,
+}
+
+#[tauri::command]
+fn get_network_sync_settings() -> NetworkSyncSettings {
+    match sqlite::get_network_sync_settings() {
+        Ok(settings) => NetworkSyncSettings {
+            enabled: settings.enabled,
+            prompted: settings.prompted,
+            last_sync: settings.last_sync,
+        },
+        Err(e) => {
+            println!("get_network_sync_settings error: {:?}", e);
+            NetworkSyncSettings {
+                enabled: false,
+                prompted: false,
+                last_sync: None,
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn save_network_sync_settings(enabled: bool, prompted: bool) -> bool {
+    match sqlite::save_network_sync_settings(enabled, prompted) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("save_network_sync_settings error: {:?}", e);
+            false
+        }
+    }
+}
+
+#[tauri::command]
+fn get_export_fields() -> Vec<String> {
+    match sqlite::get_export_fields() {
+        Ok(fields) => fields,
+        Err(e) => {
+            println!("get_export_fields error: {:?}", e);
+            vec![]
+        }
+    }
+}
+
+#[tauri::command]
+fn save_export_fields(fields: Vec<String>) -> bool {
+    match sqlite::save_export_fields(&fields) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("save_export_fields error: {:?}", e);
+            false
+        }
+    }
+}
+
+#[tauri::command]
+fn get_favorite_filter() -> i32 {
+    match sqlite::get_favorite_filter() {
+        Ok(value) => value,
+        Err(e) => {
+            println!("get_favorite_filter error: {:?}", e);
+            0
+        }
+    }
+}
+
+#[tauri::command]
+fn save_favorite_filter(value: i32) -> bool {
+    match sqlite::save_favorite_filter(value) {
+        Ok(_) => true,
+        Err(e) => {
+            println!("save_favorite_filter error: {:?}", e);
+            false
+        }
+    }
+}
+
+#[tauri::command]
 fn get_default_window_size() -> WindowSize {
     #[cfg(target_os = "macos")]
     let height = 761u32;
@@ -307,7 +414,15 @@ fn main() {
             get_display_settings,
             save_display_settings,
             get_app_version,
-            get_current_app_version
+            get_current_app_version,
+            query_all_jx3_servers,
+            sync_jx3_servers,
+            get_network_sync_settings,
+            save_network_sync_settings,
+            get_export_fields,
+            save_export_fields,
+            get_favorite_filter,
+            save_favorite_filter
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

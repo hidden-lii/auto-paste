@@ -1,20 +1,37 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Account } from '../entity/account';
 import { Category } from '../entity/category';
+import { Jx3Server } from '../entity/jx3Server';
+import { Role } from '../entity/role';
+import {
+	filterJx3ServerOption,
+	sortJx3Servers
+} from '../utils/jx3Server';
 
 const open = defineModel<boolean>({ required: true });
 const account = defineModel<Account>('account', { required: true });
 
-defineProps<{
+const props = defineProps<{
 	mode: 'insert' | 'update';
 	categories: Category[];
 	likes: { value: boolean; title: string }[];
+	servers: Jx3Server[];
 }>();
 
 const emit = defineEmits<{
 	quit: [];
 	save: [];
 }>();
+
+const serverOptions = computed(() =>
+	sortJx3Servers(props.servers).map((item) => ({
+		title: `${item.server} (${item.status})`,
+		value: item.server,
+		zone: item.zone,
+		status: item.status
+	}))
+);
 
 const rules = {
 	required: (v: string) => !!v || v !== '' || '该项必填!',
@@ -46,6 +63,17 @@ function preventNonDigitInput(event: KeyboardEvent) {
 	if (!/^\d$/.test(event.key)) {
 		event.preventDefault();
 	}
+}
+
+function addRole() {
+	if (!account.value.roles) {
+		account.value.roles = [];
+	}
+	account.value.roles.push(new Role());
+}
+
+function removeRole(index: number) {
+	account.value.roles.splice(index, 1);
 }
 </script>
 
@@ -90,13 +118,66 @@ function preventNonDigitInput(event: KeyboardEvent) {
 					/>
 					<v-select
 						v-model="account.liked"
-						label="标记账号为'喜欢'"
+						label="收藏状态"
 						:items="likes"
 						item-title="title"
 						item-value="value"
 						density="compact"
 						variant="solo-filled"
 					/>
+					<div class="role-section">
+						<div class="role-section-title">角色区服</div>
+						<div
+							v-for="(role, index) in account.roles"
+							:key="index"
+							class="role-row"
+						>
+							<v-text-field
+								v-model="role.role_id"
+								label="角色 ID"
+								variant="solo-filled"
+								density="compact"
+								clearable
+								class="role-field"
+							/>
+							<v-autocomplete
+								v-model="role.server"
+								label="区服*"
+								:items="serverOptions"
+								item-title="title"
+								item-value="value"
+								variant="solo-filled"
+								density="compact"
+								class="role-field"
+								clearable
+								:menu-props="{ maxHeight: 250 }"
+								:custom-filter="filterJx3ServerOption"
+							>
+								<template #item="{ props: itemProps, item }">
+									<v-list-item
+										v-bind="itemProps"
+										:subtitle="item.raw.zone"
+									/>
+								</template>
+							</v-autocomplete>
+							<v-btn
+								icon="mdi-delete"
+								size="small"
+								variant="text"
+								color="error"
+								@click="removeRole(index)"
+							/>
+						</div>
+						<v-btn
+							variant="tonal"
+							size="small"
+							prepend-icon="mdi-plus"
+							class="mt-1"
+							@click="addRole"
+						>
+							添加角色
+						</v-btn>
+					</div>
 					<v-text-field
 						v-model.number="account.sequence"
 						label="账号优先级(用于排序)"
@@ -149,5 +230,27 @@ function preventNonDigitInput(event: KeyboardEvent) {
 .ac-input-no-padding :deep(input) {
 	padding: 0 !important;
 	box-shadow: none !important;
+}
+
+.role-section {
+	margin: 8px 0 12px;
+}
+
+.role-section-title {
+	font-size: 0.85rem;
+	margin-bottom: 8px;
+	opacity: 0.85;
+}
+
+.role-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.role-field {
+	flex: 1;
+	min-width: 0;
 }
 </style>

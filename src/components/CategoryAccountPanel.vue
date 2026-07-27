@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Account } from '../entity/account';
 import { Category } from '../entity/category';
+import { Jx3Server } from '../entity/jx3Server';
 import AccountCardList from './AccountCardList.vue';
 import CategoryTabBar from './CategoryTabBar.vue';
 
@@ -12,6 +13,7 @@ defineProps<{
 	hideUsername: boolean;
 	hidePassword: boolean;
 	draggableEnabled: boolean;
+	servers: Jx3Server[];
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +24,7 @@ const emit = defineEmits<{
 	edit: [account: Account];
 	like: [id: number, liked: boolean];
 	delete: [id: number];
+	share: [account: Account];
 	copy: [text: string];
 }>();
 </script>
@@ -41,10 +44,12 @@ const emit = defineEmits<{
 				:hide-username="hideUsername"
 				:hide-password="hidePassword"
 				:draggable-enabled="draggableEnabled"
+				:servers="servers"
 				@reorder="emit('reorder', $event)"
 				@edit="emit('edit', $event)"
 				@like="(id, liked) => emit('like', id, liked)"
 				@delete="(id) => emit('delete', id)"
+				@share="emit('share', $event)"
 				@copy="emit('copy', $event)"
 			/>
 		</div>

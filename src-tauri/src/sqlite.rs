@@ -1,5 +1,8 @@
 use crate::entity::account::Account;
 use crate::entity::category::Category;
+use crate::entity::jx3_server::Jx3Server;
+use crate::entity::role::Role;
+use crate::jx3_sync::{fallback_servers, fetch_servers_from_api};
 use rusqlite::{params, Connection, Result, ToSql};
 use std::cmp::Ordering;
 use std::sync::Mutex;
@@ -209,6 +212,46 @@ fn migrate_to_1_1_2(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn migrate_to_1_1_4(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS role (
+            id INTEGER PRIMARY KEY,
+            account_id INTEGER NOT NULL,
+            role_id TEXT NOT NULL,
+            server TEXT NOT NULL,
+            last_update_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now', 'localtime'))
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_role_account_id ON role(account_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS jx3_server (
+            id INTEGER PRIMARY KEY,
+            zone TEXT NOT NULL,
+            server TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            last_update_time TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now', 'localtime'))
+        );",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_jx3_server_zone ON jx3_server(zone)",
+        [],
+    )?;
+
+    upsert_jx3_servers_with_conn(conn, &fallback_servers())?;
+
+    ensure_setting_default(conn, "export_fields", r#"["name","username","password","roles","description"]"#)?;
+    ensure_setting_default(conn, "network_sync_enabled", "0")?;
+    ensure_setting_default(conn, "network_sync_prompted", "0")?;
+    ensure_setting_default(conn, "favorite_filter", "0")?;
+
+    Ok(())
+}
+
 fn ensure_setting_default(conn: &Connection, key: &str, default_value: &str) -> Result<()> {
     if get_setting_with_conn(conn, key)?.is_none() {
         set_setting_with_conn(conn, key, default_value)?;
@@ -267,6 +310,7 @@ fn merge_database_schema(conn: &Connection) -> Result<()> {
     )?;
 
     migrate_to_1_1_0(conn)?;
+    migrate_to_1_1_4(conn)?;
     ensure_triggers(conn)?;
 
     Ok(())
@@ -290,6 +334,11 @@ const MIGRATIONS: &[Migration] = &[
         version: "1.1.2",
         description: "优先级字段由 priority 迁移为 sequence",
         migrate: migrate_to_1_1_2,
+    },
+    Migration {
+        version: "1.1.4",
+        description: "添加角色区服表与 JX3 区服字典",
+        migrate: migrate_to_1_1_4,
     },
 ];
 
@@ -400,9 +449,10 @@ pub(crate) fn initialize_database() -> Result<()> {
 
 pub(crate) fn insert_account(account: &Account) -> Result<()> {
     let conn = &mut DB_CONNECTION.lock().unwrap();
+    let batch = conn.transaction()?;
 
     let default_description = "这个人好懒,没有给他写备注信息呢┓(´∀`)┏".to_string();
-    conn.execute(
+    batch.execute(
         "INSERT INTO account (name, username, password, sequence, liked, description, last_update_time)
         VALUES (?, ?, ?, IFNULL(?, 1), ?, ?, datetime('now'))",
         params![
@@ -410,14 +460,12 @@ pub(crate) fn insert_account(account: &Account) -> Result<()> {
             account.username,
             account.password,
             account.sequence,
-            account.liked.unwrap(),
+            account.liked.unwrap_or(false),
             if account.description.is_none() || account.description.clone().unwrap().is_empty() { default_description } else { account.description.clone().unwrap() },
         ],
     )?;
 
-    let account_id = conn.last_insert_rowid() as i32;
-
-    let batch = conn.transaction()?;
+    let account_id = batch.last_insert_rowid() as i32;
 
     if let Some(account_category_ids) = &account.account_category_ids {
         for category_id in account_category_ids {
@@ -428,6 +476,8 @@ pub(crate) fn insert_account(account: &Account) -> Result<()> {
             )?;
         }
     }
+
+    insert_roles_in_tx(&batch, account_id, account.roles.as_ref())?;
 
     batch.commit()?;
 
@@ -470,6 +520,9 @@ pub(crate) fn update_account(account: &Account) -> Result<()> {
             }
         }
 
+        batch.execute("DELETE FROM role WHERE account_id = ?", params![account.id])?;
+        insert_roles_in_tx(&batch, account.id.unwrap(), account.roles.as_ref())?;
+
         batch.commit()?;
     }
 
@@ -490,6 +543,7 @@ pub(crate) fn delete_by_id(id: i32) -> Result<()> {
     let conn = &mut DB_CONNECTION.lock().unwrap();
     let batch = conn.transaction()?;
 
+    batch.execute("DELETE FROM role WHERE account_id = ?", params![id])?;
     batch.execute("DELETE FROM account WHERE id = ?", params![id])?;
 
     batch.execute(
@@ -524,7 +578,7 @@ pub(crate) fn query_all_accounts() -> Result<Vec<Account>> {
         ORDER BY a.sequence ASC, a.id ASC"
     )?;
 
-    Ok(_do_query_accounts(&mut stmt, &[])?)
+    attach_roles_to_accounts(_do_query_accounts(&mut stmt, &[])?)
 }
 
 pub(crate) fn query_accounts_by_value(
@@ -585,7 +639,7 @@ pub(crate) fn query_accounts_by_value(
     let conn = DB_CONNECTION.lock().unwrap();
     let mut stmt = conn.prepare(&query)?;
 
-    Ok(_do_query_accounts(&mut stmt, &params)?)
+    attach_roles_to_accounts(_do_query_accounts(&mut stmt, &params)?)
 }
 
 fn _do_query_accounts(
@@ -612,6 +666,7 @@ fn _do_query_accounts(
             description: row.get(6)?,
             last_update_time: row.get(7)?,
             account_category_ids,
+            roles: Some(Vec::new()),
         })
     })?;
 
@@ -837,5 +892,198 @@ pub(crate) fn get_app_version() -> Result<String> {
 
 pub(crate) fn get_current_app_version() -> &'static str {
     APP_VERSION
+}
+
+fn insert_roles_in_tx(
+    batch: &rusqlite::Transaction,
+    account_id: i32,
+    roles: Option<&Vec<Role>>,
+) -> Result<()> {
+    if let Some(roles) = roles {
+        for role in roles {
+            if role.role_id.trim().is_empty() || role.server.trim().is_empty() {
+                continue;
+            }
+            batch.execute(
+                "INSERT INTO role (account_id, role_id, server, last_update_time)
+                 VALUES (?, ?, ?, datetime('now'))",
+                params![account_id, role.role_id.trim(), role.server.trim()],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn load_all_roles_map(conn: &Connection) -> Result<std::collections::HashMap<i32, Vec<Role>>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, account_id, role_id, server, last_update_time FROM role ORDER BY id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Role {
+            id: row.get(0)?,
+            account_id: row.get(1)?,
+            role_id: row.get(2)?,
+            server: row.get(3)?,
+            last_update_time: row.get(4)?,
+        })
+    })?;
+
+    let mut map: std::collections::HashMap<i32, Vec<Role>> = std::collections::HashMap::new();
+    for row in rows {
+        let role = row?;
+        if let Some(account_id) = role.account_id {
+            map.entry(account_id).or_default().push(role);
+        }
+    }
+    Ok(map)
+}
+
+fn attach_roles_to_accounts(mut accounts: Vec<Account>) -> Result<Vec<Account>> {
+    if accounts.is_empty() {
+        return Ok(accounts);
+    }
+    let conn = DB_CONNECTION.lock().unwrap();
+    let roles_map = load_all_roles_map(&conn)?;
+    for account in &mut accounts {
+        if let Some(id) = account.id {
+            account.roles = Some(roles_map.get(&id).cloned().unwrap_or_default());
+        } else {
+            account.roles = Some(Vec::new());
+        }
+    }
+    Ok(accounts)
+}
+
+pub(crate) fn upsert_jx3_servers_with_conn(
+    conn: &Connection,
+    servers: &[Jx3Server],
+) -> Result<()> {
+    for server in servers {
+        conn.execute(
+            "INSERT INTO jx3_server (zone, server, status, last_update_time)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(server) DO UPDATE SET
+                zone = excluded.zone,
+                status = excluded.status,
+                last_update_time = datetime('now')",
+            params![server.zone, server.server, server.status],
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn query_all_jx3_servers() -> Result<Vec<Jx3Server>> {
+    let conn = DB_CONNECTION.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT id, zone, server, status, last_update_time FROM jx3_server ORDER BY zone ASC, server ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Jx3Server {
+            id: row.get(0)?,
+            zone: row.get(1)?,
+            server: row.get(2)?,
+            status: row.get(3)?,
+            last_update_time: row.get(4)?,
+        })
+    })?;
+
+    let mut servers = Vec::new();
+    for row in rows {
+        servers.push(row?);
+    }
+    Ok(servers)
+}
+
+pub(crate) fn sync_jx3_servers(force_fallback: bool) -> Result<bool> {
+    let network_enabled = get_setting("network_sync_enabled")?
+        .map(|v| v == "1")
+        .unwrap_or(false);
+
+    let servers = if !force_fallback && network_enabled {
+        match fetch_servers_from_api() {
+            Ok(list) => list,
+            Err(err) => {
+                println!("JX3API 同步失败，使用兜底数据: {err}");
+                fallback_servers()
+            }
+        }
+    } else {
+        fallback_servers()
+    };
+
+    let conn = DB_CONNECTION.lock().unwrap();
+    upsert_jx3_servers_with_conn(&conn, &servers)?;
+    set_setting_with_conn(&conn, "jx3_server_last_sync", &chrono_lite_now())?;
+    Ok(network_enabled && !force_fallback)
+}
+
+fn chrono_lite_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    secs.to_string()
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct NetworkSyncSettings {
+    pub(crate) enabled: bool,
+    pub(crate) prompted: bool,
+    pub(crate) last_sync: Option<String>,
+}
+
+pub(crate) fn get_network_sync_settings() -> Result<NetworkSyncSettings> {
+    Ok(NetworkSyncSettings {
+        enabled: get_setting("network_sync_enabled")?
+            .map(|v| v == "1")
+            .unwrap_or(false),
+        prompted: get_setting("network_sync_prompted")?
+            .map(|v| v == "1")
+            .unwrap_or(false),
+        last_sync: get_setting("jx3_server_last_sync")?,
+    })
+}
+
+pub(crate) fn save_network_sync_settings(enabled: bool, prompted: bool) -> Result<()> {
+    set_setting("network_sync_enabled", if enabled { "1" } else { "0" })?;
+    set_setting("network_sync_prompted", if prompted { "1" } else { "0" })?;
+    Ok(())
+}
+
+pub(crate) fn get_export_fields() -> Result<Vec<String>> {
+    let default = vec![
+        "name".to_string(),
+        "username".to_string(),
+        "password".to_string(),
+        "roles".to_string(),
+        "description".to_string(),
+    ];
+    match get_setting("export_fields")? {
+        Some(value) => {
+            let parsed: Vec<String> = serde_json::from_str(&value).unwrap_or(default.clone());
+            if parsed.is_empty() {
+                Ok(default)
+            } else {
+                Ok(parsed)
+            }
+        }
+        None => Ok(default),
+    }
+}
+
+pub(crate) fn save_export_fields(fields: &[String]) -> Result<()> {
+    let value = serde_json::to_string(fields).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    set_setting("export_fields", &value)
+}
+
+pub(crate) fn get_favorite_filter() -> Result<i32> {
+    Ok(get_setting("favorite_filter")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0))
+}
+
+pub(crate) fn save_favorite_filter(value: i32) -> Result<()> {
+    set_setting("favorite_filter", &value.to_string())
 }
 
