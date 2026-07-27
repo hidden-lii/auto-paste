@@ -578,7 +578,7 @@ pub(crate) fn query_all_accounts() -> Result<Vec<Account>> {
         ORDER BY a.sequence ASC, a.id ASC"
     )?;
 
-    attach_roles_to_accounts(_do_query_accounts(&mut stmt, &[])?)
+    attach_roles_to_accounts(&conn, _do_query_accounts(&mut stmt, &[])?)
 }
 
 pub(crate) fn query_accounts_by_value(
@@ -639,7 +639,7 @@ pub(crate) fn query_accounts_by_value(
     let conn = DB_CONNECTION.lock().unwrap();
     let mut stmt = conn.prepare(&query)?;
 
-    attach_roles_to_accounts(_do_query_accounts(&mut stmt, &params)?)
+    attach_roles_to_accounts(&conn, _do_query_accounts(&mut stmt, &params)?)
 }
 
 fn _do_query_accounts(
@@ -938,12 +938,11 @@ fn load_all_roles_map(conn: &Connection) -> Result<std::collections::HashMap<i32
     Ok(map)
 }
 
-fn attach_roles_to_accounts(mut accounts: Vec<Account>) -> Result<Vec<Account>> {
+fn attach_roles_to_accounts(conn: &Connection, mut accounts: Vec<Account>) -> Result<Vec<Account>> {
     if accounts.is_empty() {
         return Ok(accounts);
     }
-    let conn = DB_CONNECTION.lock().unwrap();
-    let roles_map = load_all_roles_map(&conn)?;
+    let roles_map = load_all_roles_map(conn)?;
     for account in &mut accounts {
         if let Some(id) = account.id {
             account.roles = Some(roles_map.get(&id).cloned().unwrap_or_default());
